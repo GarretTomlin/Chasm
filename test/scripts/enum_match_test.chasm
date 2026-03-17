@@ -1,0 +1,19 @@
+enum Direction { North, South, East, West }
+
+def describe_dir(d :: int) :: int do
+  result :: int = match d {
+    North => 1
+    South => 2
+    East  => 3
+    West  => 4
+    _     => 0
+  }
+  return result
+end
+
+def main() do
+  print(describe_dir(0))
+  print(describe_dir(1))
+  print(describe_dir(2))
+  print(describe_dir(3))
+end

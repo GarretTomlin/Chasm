@@ -1,0 +1,67 @@
+{
+  "name": "chasm-language",
+  "displayName": "Chasm",
+  "description": "Language support for Chasm — syntax highlighting, diagnostics, and hover via chasm-lsp",
+  "version": "0.1.0",
+  "publisher": "chasm",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:chasm"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "chasm",
+        "aliases": [
+          "Chasm",
+          "chasm"
+        ],
+        "extensions": [
+          ".chasm"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "chasm",
+        "scopeName": "source.chasm",
+        "path": "./syntaxes/chasm.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Chasm",
+      "properties": {
+        "chasm.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to chasm-lsp binary. Leave empty to use the one on your PATH."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "bundle": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "npm run bundle -- --watch",
+    "package": "vsce package --allow-missing-repository",
+    "vscode:prepublish": "npm run bundle"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^2.0.0",
+    "esbuild": "^0.27.4",
+    "typescript": "^5.0.0"
+  }
+}

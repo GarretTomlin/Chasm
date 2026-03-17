@@ -1,0 +1,6 @@
+import "utils"
+
+def main() do
+  result :: int = utils.add(3, 4)
+  print(result)
+end

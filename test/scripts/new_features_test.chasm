@@ -1,0 +1,24 @@
+def test_hex() do
+  print(0xFF)
+end
+
+def test_for_loop() do
+  for i in 0..5 do
+    print(i)
+  end
+end
+
+def test_string_concat() do
+  name = "world"
+  print(str_concat("hello ", name))
+end
+
+def test_array() do
+  a = array_new(3)
+  array_push(a, 10)
+  array_push(a, 20)
+  array_push(a, 30)
+  print(array_len(a))
+  print(array_get(a, 0))
+  print(array_get(a, 2))
+end

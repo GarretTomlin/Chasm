@@ -1,0 +1,58 @@
+# example.chasm — Bouncing ball demo
+# Run: chasm run --engine raylib engine/example.chasm
+
+@x      :: script = 400.0
+@y      :: script = 300.0
+@vx     :: script = 200.0
+@vy     :: script = 150.0
+@radius :: script = 24.0
+@speed  :: script = 1.0
+
+def on_tick(dt :: float) do
+  # Speed multiplier via keyboard
+  @speed = 1.0
+  if key_down(340) do   # LEFT_SHIFT — slow
+    @speed = 0.3
+  end
+  if key_down(32) do    # SPACE — boost
+    @speed = 2.5
+  end
+
+  effective_dt :: frame = dt * @speed
+
+  @x = @x + @vx * effective_dt
+  @y = @y + @vy * effective_dt
+
+  # Bounce off walls
+  if @x < @radius do
+    @x = @radius
+    @vx = abs(@vx)
+  end
+  if @x > 800.0 - @radius do
+    @x = 800.0 - @radius
+    @vx = 0.0 - abs(@vx)
+  end
+  if @y < @radius do
+    @y = @radius
+    @vy = abs(@vy)
+  end
+  if @y > 600.0 - @radius do
+    @y = 600.0 - @radius
+    @vy = 0.0 - abs(@vy)
+  end
+end
+
+def on_draw() do
+  clear(0x181820ff)
+
+  # Trail ring
+  draw_circle_lines(@x, @y, @radius + 6.0, 0xff445533)
+
+  # Ball
+  draw_circle(@x, @y, @radius, 0xff4455ff)
+
+  # HUD
+  draw_text("Chasm + Raylib 5.5", 12.0, 12.0, 20, 0xffffffff)
+  draw_text("SHIFT: slow  |  SPACE: boost", 12.0, 38.0, 16, 0x888888ff)
+  draw_fps(12.0, 580.0)
+end

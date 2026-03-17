@@ -1,0 +1,12 @@
+# Simple script to test chasm run
+
+@counter :: script = 0
+
+def tick() do
+  @counter = copy_to_script(@counter + 1)
+  print(@counter)
+end
+
+def greet() do
+  print(42)
+end

@@ -1,0 +1,114 @@
+{
+  "name": "Chasm",
+  "scopeName": "source.chasm",
+  "fileTypes": ["chasm"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#module_attr" },
+    { "include": "#lifetime_annotation" },
+    { "include": "#keyword" },
+    { "include": "#builtin_function" },
+    { "include": "#atom" },
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#operator" },
+    { "include": "#identifier" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.number-sign.chasm",
+      "match": "#.*$"
+    },
+    "module_attr": {
+      "name": "variable.other.module-attribute.chasm",
+      "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
+    },
+    "lifetime_annotation": {
+      "patterns": [
+        {
+          "name": "storage.modifier.lifetime.frame.chasm",
+          "match": "\\bframe\\b"
+        },
+        {
+          "name": "storage.modifier.lifetime.script.chasm",
+          "match": "\\bscript\\b"
+        },
+        {
+          "name": "storage.modifier.lifetime.persistent.chasm",
+          "match": "\\bpersistent\\b"
+        }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        {
+          "name": "keyword.control.chasm",
+          "match": "\\b(if|else|end|while|case|when|do)\\b"
+        },
+        {
+          "name": "keyword.declaration.chasm",
+          "match": "\\b(def|defp|defstruct)\\b"
+        },
+        {
+          "name": "constant.language.chasm",
+          "match": "\\b(true|false|nil)\\b"
+        }
+      ]
+    },
+    "builtin_function": {
+      "name": "support.function.builtin.chasm",
+      "match": "\\b(copy_to_script|persist_copy|scale|clamp|abs|sqrt|print)\\b"
+    },
+    "atom": {
+      "name": "constant.other.atom.chasm",
+      "match": ":[a-zA-Z_][a-zA-Z0-9_]*"
+    },
+    "string": {
+      "name": "string.quoted.double.chasm",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.chasm",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "number": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.chasm",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.chasm",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "operator": {
+      "patterns": [
+        {
+          "name": "keyword.operator.pipe.chasm",
+          "match": "\\|>"
+        },
+        {
+          "name": "keyword.operator.lifetime.chasm",
+          "match": "::"
+        },
+        {
+          "name": "keyword.operator.arrow.chasm",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.chasm",
+          "match": "[+\\-*/<>=!&|]+"
+        }
+      ]
+    },
+    "identifier": {
+      "name": "variable.other.chasm",
+      "match": "[a-zA-Z_][a-zA-Z0-9_?!]*"
+    }
+  }
+}

@@ -1,0 +1,62 @@
+# Example Chasm script — Elixir-like syntax with three-lifetime memory model.
+
+# Module-level attributes carry explicit lifetime annotations.
+@score :: script = 0
+@high_score :: persistent = 0
+
+# Structs use defstruct / do / end.
+defstruct Vec2 do
+  x :: f32
+  y :: f32
+end
+
+defstruct Player do
+  health :: int
+  pos :: Vec2
+end
+
+# Private helper: result is frame-lifetime (inferred).
+defp compute_delta(dt :: f32) :: f32 do
+  speed :: frame = 9.8
+  speed * dt
+end
+
+# Per-tick update — explicit promotions make allocation costs visible.
+def on_tick(dt :: f32) do
+  delta :: frame = compute_delta(dt)
+  saved :: script = copy_to_script(delta)
+  @score = saved
+
+  # Pipe chains compose cleanly without nesting.
+  result = delta |> scale(2.0) |> clamp(0.0, 100.0)
+
+  if result > 50.0 do
+    @score = copy_to_script(result)
+  else
+    @score = copy_to_script(0.0)
+  end
+end
+
+# Persist final score at save time — one explicit cost, paid once.
+def on_save() do
+  final :: persistent = persist_copy(@score)
+  @high_score = final
+end
+
+# Pattern matching with case/when.
+def describe_status(status :: atom) do
+  case status do
+    when :idle -> "standing by"
+    when :running -> "in motion"
+    when :dead -> "game over"
+    _ -> "unknown"
+  end
+end
+
+# Counter loop.
+def run_loop(n :: int) do
+  i :: frame = 0
+  while i < n do
+    i = i + 1
+  end
+end

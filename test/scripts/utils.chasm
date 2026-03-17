@@ -1,0 +1,7 @@
+def add(a :: int, b :: int) :: int do
+  return a + b
+end
+
+def greet(name :: str) :: str do
+  return "hello"
+end
