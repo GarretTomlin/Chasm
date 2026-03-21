@@ -295,7 +295,7 @@ defp parse_primary(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp
       np   = r2.np
       cp   = r2.cp
       ai   = np
-      np   = alloc_node(pool, np, :match_arm, r2.node_idx, 0, 0, pat_name, pat_line, pat_col)
+      np   = alloc_node(pool, np, :match_arm, r2.node_idx, -1, 0, pat_name, pat_line, pat_col)
       arm_list.push(ai)
       pos = skip_newlines(tokens, pos)
     end
@@ -344,6 +344,20 @@ defp parse_primary(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp
         pos = pos + 1
         pat_name = str_concat(pat_name, str_concat(".", variant_name))
       end
+      # Handle payload binding: Variant(binding) or EnumName.Variant(binding)
+      binding_idx = -1
+      if tok_kind(tokens, pos) == :lparen do
+        pos = pos + 1
+        bind_name = tok_lex(tokens, pos)
+        bind_line = tok_line(tokens, pos)
+        bind_col  = tok_col(tokens, pos)
+        pos = pos + 1
+        binding_idx = np
+        np = alloc_node(pool, np, :ident, 0, 0, 0, bind_name, bind_line, bind_col)
+        if tok_kind(tokens, pos) == :rparen do
+          pos = pos + 1
+        end
+      end
       if tok_kind(tokens, pos) == :arrow do
         pos = pos + 1
       end
@@ -352,7 +366,7 @@ defp parse_primary(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp
       np   = r2.np
       cp   = r2.cp
       ai   = np
-      np   = alloc_node(pool, np, :match_arm, r2.node_idx, 0, 0, pat_name, pat_line, pat_col)
+      np   = alloc_node(pool, np, :match_arm, r2.node_idx, binding_idx, 0, pat_name, pat_line, pat_col)
       arm_list.push(ai)
       pos = skip_newlines(tokens, pos)
     end

@@ -80,9 +80,6 @@ chasm run examples/hello/hello.chasm
 chasm run --engine raylib examples/game/example.chasm
 ```
 
-> **Platform support:** macOS arm64. To build for other platforms, see `archive/zig-compiler/`.
-
----
 
 ## Project Structure
 

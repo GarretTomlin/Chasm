@@ -1,0 +1,328 @@
+# Bootstrap Chasm compiler — WebAssembly Text (WAT) emitter.
+#
+# Walks the typed AST and emits WAT (WebAssembly Text Format).
+# Assemble with: wat2wasm out.wat -o out.wasm
+#
+# Supported: int/float/bool arithmetic, function calls, if/while/return,
+#            local variables, module @attrs as mutable globals,
+#            extern fn declarations as WASM imports.
+# Not yet: arrays, structs, strings (require linear memory).
+
+# ---- WAT type helpers -------------------------------------------------------
+
+defp wat_type(tid :: int) :: string do
+  if tid == 1 do return "i64" end
+  if tid == 2 do return "f64" end
+  if tid == 3 do return "i32" end
+  if tid == 5 do return "i32" end
+  return "i64"
+end
+
+# ---- Emit WAT expression ----------------------------------------------------
+# is_global_fn: 1 = treat all idents as globals (for @attr init), 0 = locals
+
+defp wat_expr(pool :: []Node, ch :: []int, types :: []int,
+              structs :: []StructDef, fns :: []FnSig,
+              idx :: int) :: string do
+  if idx < 0 do return "(i64.const 0)" end
+  node = pool.get(idx)
+  tag  = node.tag
+
+  if tag == :int_lit   do return str_concat("(i64.const ", str_concat(node.name, ")")) end
+  if tag == :float_lit do return str_concat("(f64.const ", str_concat(node.name, ")")) end
+  if tag == :bool_lit  do
+    if node.name == "true" do return "(i32.const 1)" end
+    return "(i32.const 0)"
+  end
+  if tag == :atom_lit  do return "(i32.const 0)" end
+
+  if tag == :ident do
+    return str_concat("(local.get $", str_concat(node.name, ")"))
+  end
+
+  if tag == :at_ref do
+    attr_name = str_slice(node.name, 1, str_len(node.name))
+    return str_concat("(global.get $g_", str_concat(attr_name, ")"))
+  end
+
+  if tag == :binop do
+    lc = wat_expr(pool, ch, types, structs, fns, node.a)
+    rc = wat_expr(pool, ch, types, structs, fns, node.b)
+    lt = types.get(node.a)
+    op = node.name
+    wt = wat_type(lt)
+    cop = "i64.add"
+    if op == "+" do
+      if lt == 2 do cop = "f64.add" else cop = "i64.add" end
+    end
+    if op == "-" do
+      if lt == 2 do cop = "f64.sub" else cop = "i64.sub" end
+    end
+    if op == "*" do
+      if lt == 2 do cop = "f64.mul" else cop = "i64.mul" end
+    end
+    if op == "/" do
+      if lt == 2 do cop = "f64.div" else cop = "i64.div_s" end
+    end
+    if op == "==" do
+      if lt == 2 do cop = "f64.eq" else cop = str_concat(wt, ".eq") end
+    end
+    if op == "!=" do
+      if lt == 2 do cop = "f64.ne" else cop = str_concat(wt, ".ne") end
+    end
+    if op == "<" do
+      if lt == 2 do cop = "f64.lt" else cop = "i64.lt_s" end
+    end
+    if op == ">" do
+      if lt == 2 do cop = "f64.gt" else cop = "i64.gt_s" end
+    end
+    if op == "<=" do
+      if lt == 2 do cop = "f64.le" else cop = "i64.le_s" end
+    end
+    if op == ">=" do
+      if lt == 2 do cop = "f64.ge" else cop = "i64.ge_s" end
+    end
+    if op == "and" do cop = "i32.and" end
+    if op == "or"  do cop = "i32.or"  end
+    return str_concat("(", str_concat(cop, str_concat(" ", str_concat(lc, str_concat(" ", str_concat(rc, ")"))))))
+  end
+
+  if tag == :unary do
+    sc = wat_expr(pool, ch, types, structs, fns, node.a)
+    st = types.get(node.a)
+    if node.name == "not" do return str_concat("(i32.eqz ", str_concat(sc, ")")) end
+    if st == 2 do return str_concat("(f64.neg ", str_concat(sc, ")")) end
+    return str_concat("(i64.sub (i64.const 0) ", str_concat(sc, ")"))
+  end
+
+  if tag == :call do
+    cs      = node.a
+    cl      = node.b
+    fn_name = node.name
+    args_s  = ""
+    ai = 0
+    while ai < cl do
+      arg_idx = ch.get(cs + ai)
+      ac = wat_expr(pool, ch, types, structs, fns, arg_idx)
+      args_s = str_concat(args_s, str_concat(" ", ac))
+      ai = ai + 1
+    end
+    return str_concat("(call $", str_concat(fn_name, str_concat(args_s, ")")))
+  end
+
+  return "(i64.const 0)"
+end
+
+# ---- Emit WAT statements ----------------------------------------------------
+
+defp wat_stmts(pool :: []Node, ch :: []int, types :: []int,
+               structs :: []StructDef, fns :: []FnSig,
+               depth :: int, block_idx :: int) do
+  if block_idx < 0 do return end
+  node = pool.get(block_idx)
+  cs   = node.a
+  cl   = node.b
+  ind  = indent_str(depth)
+  i    = 0
+  while i < cl do
+    child = ch.get(cs + i)
+    cn    = pool.get(child)
+    ctag  = cn.tag
+
+    if ctag == :var_decl do
+      val_c = wat_expr(pool, ch, types, structs, fns, cn.b)
+      print(str_concat(ind, str_concat("(local.set $", str_concat(cn.name, str_concat(" ", str_concat(val_c, ")"))))))
+    end
+
+    if ctag == :assign do
+      lhs_node = pool.get(cn.a)
+      lhs_name = lhs_node.name
+      val_c    = wat_expr(pool, ch, types, structs, fns, cn.b)
+      print(str_concat(ind, str_concat("(local.set $", str_concat(lhs_name, str_concat(" ", str_concat(val_c, ")"))))))
+    end
+
+    if ctag == :at_assign do
+      attr_name = str_slice(cn.name, 1, str_len(cn.name))
+      val_c     = wat_expr(pool, ch, types, structs, fns, cn.b)
+      print(str_concat(ind, str_concat("(global.set $g_", str_concat(attr_name, str_concat(" ", str_concat(val_c, ")"))))))
+    end
+
+    if ctag == :return_stmt do
+      if cn.a >= 0 do
+        val_c = wat_expr(pool, ch, types, structs, fns, cn.a)
+        print(str_concat(ind, str_concat("(return ", str_concat(val_c, ")"))))
+      else
+        print(str_concat(ind, "(return)"))
+      end
+    end
+
+    if ctag == :if_stmt do
+      cond_c = wat_expr(pool, ch, types, structs, fns, cn.a)
+      print(str_concat(ind, str_concat("(if ", str_concat(cond_c, " (then"))))
+      wat_stmts(pool, ch, types, structs, fns, depth + 1, cn.b)
+      if cn.c >= 0 do
+        print(str_concat(ind, ") (else"))
+        wat_stmts(pool, ch, types, structs, fns, depth + 1, cn.c)
+      end
+      print(str_concat(ind, "))"))
+    end
+
+    if ctag == :while_stmt do
+      print(str_concat(ind, "(block $brk"))
+      print(str_concat(ind, "  (loop $lp"))
+      cond_c = wat_expr(pool, ch, types, structs, fns, cn.a)
+      print(str_concat(ind, str_concat("    (br_if $brk (i32.eqz ", str_concat(cond_c, "))"))))
+      wat_stmts(pool, ch, types, structs, fns, depth + 2, cn.b)
+      print(str_concat(ind, "    (br $lp)"))
+      print(str_concat(ind, "  )"))
+      print(str_concat(ind, ")"))
+    end
+
+    if ctag == :call do
+      ec    = wat_expr(pool, ch, types, structs, fns, child)
+      ret_t = types.get(child)
+      if ret_t != 6 do
+        print(str_concat(ind, str_concat("(drop ", str_concat(ec, ")"))))
+      else
+        print(str_concat(ind, ec))
+      end
+    end
+
+    i = i + 1
+  end
+end
+
+# ---- Emit a single WAT function ---------------------------------------------
+
+defp wat_fn(pool :: []Node, ch :: []int, types :: []int,
+            structs :: []StructDef, fns :: []FnSig,
+            fn_idx :: int) do
+  fn_node      = pool.get(fn_idx)
+  params_start = fn_node.a
+  params_count = fn_node.b
+  body         = fn_node.c
+  fn_name      = fn_split_name(fn_node.name)
+  ret_tid      = fn_split_ret(fn_node.name, structs)
+
+  # Build param string
+  params_s = ""
+  i = 0
+  while i < params_count do
+    param_idx  = ch.get(params_start + i)
+    param_node = pool.get(param_idx)
+    type_ref   = pool.get(param_node.a)
+    param_tid  = resolve_type(type_ref.name, structs)
+    wt         = wat_type(param_tid)
+    params_s   = str_concat(params_s, str_concat(" (param $", str_concat(param_node.name, str_concat(" ", str_concat(wt, ")")))))
+    i = i + 1
+  end
+
+  ret_s = ""
+  if ret_tid != 6 do
+    ret_s = str_concat(" (result ", str_concat(wat_type(ret_tid), ")"))
+  end
+
+  print(str_concat("  (func $", str_concat(fn_name, str_concat(params_s, ret_s))))
+
+  # Emit (local $name type) for each var_decl in the body
+  if body >= 0 do
+    body_node = pool.get(body)
+    bcs = body_node.a
+    bcl = body_node.b
+    bi  = 0
+    while bi < bcl do
+      child = ch.get(bcs + bi)
+      cn    = pool.get(child)
+      if cn.tag == :var_decl do
+        val_t = types.get(cn.b)
+        wt    = wat_type(val_t)
+        print(str_concat("    (local $", str_concat(cn.name, str_concat(" ", str_concat(wt, ")")))))
+      end
+      bi = bi + 1
+    end
+  end
+
+  wat_stmts(pool, ch, types, structs, fns, 2, body)
+  print("  )")
+end
+
+# ---- Top-level WASM codegen entry point -------------------------------------
+
+defp wasm_codegen(pool :: []Node, ch :: []int, root :: int,
+                  types :: []int, structs :: []StructDef,
+                  fields :: []FieldDef, fns :: []FnSig) do
+  print("(module")
+
+  root_node = pool.get(root)
+  cs = root_node.a
+  cl = root_node.b
+
+  # Emit imports for extern declarations
+  i = 0
+  while i < cl do
+    decl_idx = ch.get(cs + i)
+    decl     = pool.get(decl_idx)
+    if decl.tag == :extern_decl do
+      ext_name = fn_split_name(decl.name)
+      ret_tid  = fn_split_ret(decl.name, structs)
+      ps       = decl.a
+      pc       = decl.b
+      params_s = ""
+      pi = 0
+      while pi < pc do
+        param_idx  = ch.get(ps + pi)
+        param_node = pool.get(param_idx)
+        type_ref   = pool.get(param_node.a)
+        param_tid  = resolve_type(type_ref.name, structs)
+        params_s   = str_concat(params_s, str_concat(" ", wat_type(param_tid)))
+        pi = pi + 1
+      end
+      ret_s = ""
+      if ret_tid != 6 do
+        ret_s = str_concat(" (result ", str_concat(wat_type(ret_tid), ")"))
+      end
+      print(str_concat("  (import \042env\042 \042", str_concat(ext_name, str_concat("\042 (func $", str_concat(ext_name, str_concat(" (param", str_concat(params_s, str_concat(")", str_concat(ret_s, ")")))))))))
+    end
+    i = i + 1
+  end
+
+  # Emit mutable globals for @attrs
+  i = 0
+  while i < cl do
+    decl_idx = ch.get(cs + i)
+    decl     = pool.get(decl_idx)
+    if decl.tag == :at_decl do
+      attr_name = str_slice(decl.name, 1, str_len(decl.name))
+      init_t    = types.get(decl.a)
+      wt        = wat_type(init_t)
+      suffix = str_concat(wt, ".const 0))")
+      print(str_concat("  (global $g_", str_concat(attr_name, str_concat(" (mut ", str_concat(wt, str_concat(") (", suffix))))))
+    end
+    i = i + 1
+  end
+
+  # Emit function bodies
+  i = 0
+  while i < cl do
+    decl_idx = ch.get(cs + i)
+    decl     = pool.get(decl_idx)
+    if decl.tag == :fn_decl do
+      wat_fn(pool, ch, types, structs, fns, decl_idx)
+    end
+    i = i + 1
+  end
+
+  # Export all public functions (def, not defp)
+  i = 0
+  while i < cl do
+    decl_idx = ch.get(cs + i)
+    decl     = pool.get(decl_idx)
+    if decl.tag == :fn_decl do
+      fn_name = fn_split_name(decl.name)
+      print(str_concat("  (export \042", str_concat(fn_name, str_concat("\042 (func $", str_concat(fn_name, "))")))))
+    end
+    i = i + 1
+  end
+
+  print(")")
+end

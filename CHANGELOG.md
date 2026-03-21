@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.5.1] — 2026-03-21 — Bug fix: match arm binding sentinel
+
+### Bug fixes
+
+- `parser.chasm`: `match { }` arms were allocating `b: 0` instead of `b: -1`. Node 0 is a valid pool slot, so every atom-pattern arm appeared to have a payload binding, triggering `__auto_type bind = subj.:atom.v` extraction in codegen. Fixed to use `-1` as the no-binding sentinel.
+- Bootstrap rebuilt and fixpoint verified.
+
+---
+
+## [0.5.0] — 2026-03-21 — Stdlib, enum payloads, WASM emitter
+
+### Summary
+
+Three major features land: stdlib modules are fully implemented, enum payload destructuring works end-to-end with `case/when`, and the WASM emitter (WAT text format) is ported from the old Zig compiler. Bootstrap fixpoint verified.
+
+### Stdlib
+
+- `std/collections.chasm` — rewritten: all functions use `.len`/`.get`/`.set`/`.push`/`.pop` method syntax; no broken extern declarations.
+- `std/io.chasm` — rewritten: `print_label`, `print_label_f`, `print_label_b`, `print_sep`, `print_nl`, `assert_msg` added; builtins need no import.
+- `std/math.chasm`, `std/string.chasm` — already complete, no changes needed.
+
+### Enum payload destructuring
+
+`Shape.Circle(42)` now works as a constructor expression. `case s do when Shape.Circle(r) -> r end` extracts the payload into `r`.
+
+- **Parser**: `case/when` arms parse `Variant(binding)` patterns; binding ident stored in `arm_node.b`.
+- **Sema**: `method_call` on an enum type name resolves to that enum's `type_id` (constructor return type).
+- **Codegen**: `method_call` on an enum receiver emits `EnumName_make_Variant(val)`; payload enums emit tagged union structs + constructor macros; `match_expr` arms with bindings emit GNU statement expressions `({ __auto_type bind = subj.Variant.v; val; })`.
+
+### WASM emitter
+
+`chasm compile --target wasm file.chasm` emits WAT (WebAssembly Text Format).
+
+- `compiler/wasm.chasm` — new file: `wasm_codegen` + `wat_fn` + `wat_expr` + `wat_stmts`.
+- `compiler/main.chasm` — reads `/tmp/chasm_target.txt` and dispatches to `wasm_codegen` vs `codegen`.
+- `cmd/cli/cli.go` — `--target wasm` flag writes the target hint and uses `.wat` output extension.
+- Supported: int/float/bool arithmetic, function calls, if/while/return, locals, module `@attrs` as mutable globals, extern fn declarations as WASM imports.
+- Not yet: arrays, structs, strings (require linear memory).
+
+---
+
 ## [0.4.1] — 2026-03-21 — Bug fix: struct literal lookahead
 
 ### Bug fixes

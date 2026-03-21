@@ -56,15 +56,21 @@ func main() {
 func runCompile(args []string) {
 	path, opts := parseArgs(args)
 	if path == "" {
-		fatalf("usage: chasm compile <file.chasm> [--engine raylib]\n")
+		fatalf("usage: chasm compile <file.chasm> [--engine raylib] [--target wasm]\n")
 	}
 	outC := compileChasm(path, opts)
-	// Copy to <basename>.c next to the source.
-	dst := replaceExt(path, ".c")
+	ext := ".c"
+	if opts.targetWasm {
+		ext = ".wat"
+	}
+	dst := replaceExt(path, ext)
 	if err := copyFile(outC, dst); err != nil {
 		fatalf("compile: %v\n", err)
 	}
 	fmt.Printf("  output → %s\n", dst)
+	if opts.targetWasm {
+		fmt.Println("  assemble: wat2wasm " + dst + " -o " + replaceExt(path, ".wasm"))
+	}
 }
 
 func runRun(args []string) {
@@ -137,6 +143,15 @@ func compileChasm(path string, opts options) string {
 
 	if err := os.WriteFile("/tmp/sema_combined.chasm", combined, 0644); err != nil {
 		fatalf("write /tmp/sema_combined.chasm: %v\n", err)
+	}
+
+	// Write target hint for the compiler driver.
+	target := "c99"
+	if opts.targetWasm {
+		target = "wasm"
+	}
+	if err := os.WriteFile("/tmp/chasm_target.txt", []byte(target), 0644); err != nil {
+		fatalf("write /tmp/chasm_target.txt: %v\n", err)
 	}
 
 	bootstrap := bootstrapBin()
@@ -422,6 +437,7 @@ func raylibChasmPath() string {
 
 type options struct {
 	engineRaylib bool
+	targetWasm   bool
 }
 
 func parseArgs(args []string) (path string, opts options) {
@@ -432,6 +448,13 @@ func parseArgs(args []string) (path string, opts options) {
 				i++
 				if args[i] == "raylib" {
 					opts.engineRaylib = true
+				}
+			}
+		case "--target":
+			if i+1 < len(args) {
+				i++
+				if args[i] == "wasm" {
+					opts.targetWasm = true
 				}
 			}
 		case "--watch":

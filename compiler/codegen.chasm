@@ -260,6 +260,33 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
     if mn == "clear" do
       return str_concat("chasm_array_clear(ctx, &", str_concat(recv_c, ")"))
     end
+    # Enum constructor: EnumName.Variant(val) → EnumName_make_Variant(val)
+    if recv_node.tag == :ident do
+      si = 0
+      while si < structs.len do
+        sd = structs.get(si)
+        if sd.name == recv_node.name do
+          sn = pool.get(sd.node_idx)
+          if sn.tag == :enum_decl do
+            args_str = ""
+            ai = 0
+            while ai < cl do
+              arg_idx = ch.get(cs + ai)
+              ac = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arg_idx)
+              if ai > 0 do args_str = str_concat(args_str, ", ") end
+              args_str = str_concat(args_str, ac)
+              ai = ai + 1
+            end
+            if cl == 0 do
+              # Tag-only variant used as value: emit the tag constant
+              return str_concat(recv_node.name, str_concat("_", mn))
+            end
+            return str_concat(recv_node.name, str_concat("_make_", str_concat(mn, str_concat("(", str_concat(args_str, ")")))))
+          end
+        end
+        si = si + 1
+      end
+    end
     # Generic struct method fallback
     args_str = ""
     ai = 0
@@ -329,22 +356,18 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
     result    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, last_node.a)
     idx2 = arm_count - 2
     while idx2 >= 0 do
-      arm_node  = pool.get(ch.get(arm_start + idx2))
-      arm_val_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arm_node.a)
-      pat_lex   = arm_node.name
-      # Wildcard _ is always the default (already handled as last arm)
+      arm_node    = pool.get(ch.get(arm_start + idx2))
+      arm_val_c   = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arm_node.a)
+      pat_lex     = arm_node.name
+      binding_idx = arm_node.b
       if pat_lex != "_" do
-        # Determine comparison style based on subject type and pattern format
-        # Atom pattern: starts with ':'
-        # Enum pattern: contains '.' (e.g. "Direction.North")
-        # Integer pattern: plain number
         cond_str = ""
         if str_len(pat_lex) > 0 and str_char_at(pat_lex, 0) == 58 do
           # Atom pattern: strip leading ':'
           pat_name = str_slice(pat_lex, 1, str_len(pat_lex))
           cond_str = str_concat("(strcmp(", str_concat(subj_c, str_concat(", \042", str_concat(pat_name, "\042) == 0)"))))
         else
-          # Check for dot (enum pattern like "Direction.North")
+          # Check for dot (enum pattern like "Direction.North" or "Shape.Circle")
           dot_pos = -1
           pi = 0
           while pi < str_len(pat_lex) do
@@ -355,15 +378,37 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
             pi = pi + 1
           end
           if dot_pos >= 0 do
-            # Enum pattern: emit EnumName_Variant
             enum_name    = str_slice(pat_lex, 0, dot_pos)
             variant_name = str_slice(pat_lex, dot_pos + 1, str_len(pat_lex))
             enum_const   = str_concat(enum_name, str_concat("_", variant_name))
-            cond_str = str_concat("(", str_concat(subj_c, str_concat(" == ", str_concat(enum_const, ")"))))
+            if binding_idx >= 0 do
+              # Payload enum: check .tag field
+              cond_str = str_concat("(", str_concat(subj_c, str_concat(".tag == ", str_concat(enum_const, ")"))))
+            else
+              cond_str = str_concat("(", str_concat(subj_c, str_concat(" == ", str_concat(enum_const, ")"))))
+            end
           else
-            # Plain atom/string pattern
+            # Plain string/atom pattern
             cond_str = str_concat("(strcmp(", str_concat(subj_c, str_concat(", \042", str_concat(pat_lex, "\042) == 0)"))))
           end
+        end
+        # If there's a payload binding, wrap arm_val_c in a block that extracts it
+        if binding_idx >= 0 do
+          bind_node    = pool.get(binding_idx)
+          bind_name    = bind_node.name
+          dot_pos2 = -1
+          pi2 = 0
+          while pi2 < str_len(pat_lex) do
+            if str_char_at(pat_lex, pi2) == 46 do
+              dot_pos2 = pi2
+              pi2 = str_len(pat_lex)
+            end
+            pi2 = pi2 + 1
+          end
+          variant_name2 = str_slice(pat_lex, dot_pos2 + 1, str_len(pat_lex))
+          extract = str_concat(subj_c, str_concat(".", str_concat(variant_name2, ".v")))
+          # Emit as a GNU statement expression: ({ type bind = extract; arm_val; })
+          arm_val_c = str_concat("({ __auto_type ", str_concat(bind_name, str_concat(" = ", str_concat(extract, str_concat("; ", str_concat(arm_val_c, "; })"))))))
         end
         result = str_concat("(", str_concat(cond_str, str_concat(" ? ", str_concat(arm_val_c, str_concat(" : ", str_concat(result, ")"))))))
       end
@@ -575,18 +620,42 @@ defp emit_array_helpers(sn :: string) do
 end
 
 # ---- Emit enum typedef -------------------------------------------------------
+# For tag-only enums: emit typedef enum { ... } Name;
+# For payload enums:  emit typedef enum + tagged union struct.
+
+defp enum_has_payloads(pool :: []Node, ch :: []int, decl_idx :: int) :: bool do
+  decl = pool.get(decl_idx)
+  vs   = decl.a
+  vl   = decl.b
+  i = 0
+  while i < vl do
+    vi  = ch.get(vs + i)
+    vn  = pool.get(vi)
+    raw = vn.name
+    ci  = 0
+    while ci < str_len(raw) do
+      if str_char_at(raw, ci) == 58 do
+        return true
+      end
+      ci = ci + 1
+    end
+    i = i + 1
+  end
+  return false
+end
 
 defp emit_enum_def(pool :: []Node, ch :: []int, structs :: []StructDef, decl_idx :: int) do
-  decl = pool.get(decl_idx)
+  decl  = pool.get(decl_idx)
   ename = decl.name
   vs    = decl.a
   vl    = decl.b
+  has_p = enum_has_payloads(pool, ch, decl_idx)
+  # Emit the tag enum
   print("typedef enum {")
   i = 0
   while i < vl do
     vi   = ch.get(vs + i)
     vn   = pool.get(vi)
-    # variant name may be "Name" or "Name:type1,type2" — extract just the name
     raw  = vn.name
     vname = raw
     ci = 0
@@ -602,8 +671,66 @@ defp emit_enum_def(pool :: []Node, ch :: []int, structs :: []StructDef, decl_idx
     print(str_concat("  ", str_concat(ename, str_concat("_", str_concat(vname, str_concat(" = ", str_concat(int_to_str(i), comma)))))))
     i = i + 1
   end
-  print(str_concat("} ", str_concat(ename, ";")))
+  print(str_concat("} ", str_concat(ename, "_Tag;")))
   print("")
+  if has_p do
+    # Emit tagged union struct
+    print("typedef struct {")
+    print(str_concat("  ", str_concat(ename, "_Tag tag;")))
+    print("  union {")
+    i = 0
+    while i < vl do
+      vi   = ch.get(vs + i)
+      vn   = pool.get(vi)
+      raw  = vn.name
+      vname = raw
+      payload_types = ""
+      ci = 0
+      while ci < str_len(raw) do
+        if str_char_at(raw, ci) == 58 do
+          vname         = str_slice(raw, 0, ci)
+          payload_types = str_slice(raw, ci + 1, str_len(raw))
+          ci = str_len(raw)
+        end
+        ci = ci + 1
+      end
+      if str_len(payload_types) > 0 do
+        # Single payload field named 'v' with the payload type
+        print(str_concat("    struct { ", str_concat(payload_types, str_concat(" v; } ", str_concat(vname, ";")))))
+      end
+      i = i + 1
+    end
+    print("  };")
+    print(str_concat("} ", str_concat(ename, ";")))
+    print("")
+    # Emit constructor macros for each payload variant
+    i = 0
+    while i < vl do
+      vi   = ch.get(vs + i)
+      vn   = pool.get(vi)
+      raw  = vn.name
+      vname = raw
+      payload_types = ""
+      ci = 0
+      while ci < str_len(raw) do
+        if str_char_at(raw, ci) == 58 do
+          vname         = str_slice(raw, 0, ci)
+          payload_types = str_slice(raw, ci + 1, str_len(raw))
+          ci = str_len(raw)
+        end
+        ci = ci + 1
+      end
+      if str_len(payload_types) > 0 do
+        print(str_concat("#define ", str_concat(ename, str_concat("_make_", str_concat(vname, str_concat("(val) (", str_concat(ename, str_concat("){ .tag = ", str_concat(ename, str_concat("_", str_concat(vname, str_concat(", .", str_concat(vname, str_concat(".v = (val) }", ""))))))))))))))
+      end
+      i = i + 1
+    end
+    print("")
+  else
+    # Tag-only: typedef the tag enum directly as the type
+    print(str_concat("typedef ", str_concat(ename, str_concat("_Tag ", str_concat(ename, ";")))))
+    print("")
+  end
 end
 
 

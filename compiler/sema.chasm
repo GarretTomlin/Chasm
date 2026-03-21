@@ -396,7 +396,21 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
     end
     # Namespace call: receiver is an undeclared ident (e.g. utils.add(...))
     # Look up the method name as a plain function in fns.
+    # Also handles enum constructors: Shape.Circle(val) → type is Shape's type_id.
     if recv_node.tag == :ident do
+      # Check if receiver names an enum type — constructor call
+      si = 0
+      while si < structs.len do
+        sd = structs.get(si)
+        if sd.name == recv_node.name do
+          sn = pool.get(sd.node_idx)
+          if sn.tag == :enum_decl do
+            types.set(idx, sd.type_id)
+            return sd.type_id
+          end
+        end
+        si = si + 1
+      end
       if recv_t == 0 do
         ns_ret = fnsig_lookup(fns, mn)
         if ns_ret == 0 do

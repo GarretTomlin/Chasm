@@ -88,24 +88,37 @@ If `diff` finds differences between stage2 and stage3, there is a bug in the com
 cat compiler/lexer.chasm compiler/parser.chasm compiler/sema.chasm \
     compiler/codegen.chasm compiler/main.chasm > /tmp/sema_combined.chasm
 
-# 2. Stage 1 — old bootstrap compiles new source.
-bootstrap/bin/chasm-macos-arm64 > /tmp/stage1.c
-cp runtime/chasm_rt.h /tmp/chasm_rt.h
-cc -o /tmp/stage1 /tmp/stage1.c /tmp/chasm_harness.c -I/tmp
+# 2. Write the standalone harness (16 MB frame / 32 MB script / 64 MB persistent).
+#    The CLI writes this automatically on first run; copy it manually if needed.
+#    See cmd/cli/cli.go writeStandaloneHarness() for the exact content.
+chasm compile examples/hello_word.chasm   # triggers harness write to /tmp/
 
-# 3. Stage 2 — stage1 binary compiles new source.
-/tmp/stage1 > /tmp/stage2.c
-cc -o /tmp/stage2 /tmp/stage2.c /tmp/chasm_harness.c -I/tmp
+# 3. Stage 1 — old bootstrap compiles new source.
+bootstrap/bin/chasm-macos-arm64 /tmp/sema_combined.chasm > /tmp/stage1.c
+cp /tmp/full_harness.c /tmp/full_harness_s1.c
+cat /tmp/stage1.c >> /tmp/full_harness_s1.c
+clang -O2 -o /tmp/stage1_bin /tmp/full_harness_s1.c -I runtime/
 
-# 4. Stage 3 — verify fixpoint (stage2 output == stage3 output).
-/tmp/stage2 > /tmp/stage3.c
+# 4. Stage 2 — stage1 binary compiles new source.
+/tmp/stage1_bin /tmp/sema_combined.chasm > /tmp/stage2.c
+cp /tmp/full_harness.c /tmp/full_harness_s2.c
+cat /tmp/stage2.c >> /tmp/full_harness_s2.c
+clang -O2 -o /tmp/stage2_bin /tmp/full_harness_s2.c -I runtime/
+
+# 5. Stage 3 — verify fixpoint.
+/tmp/stage2_bin /tmp/sema_combined.chasm > /tmp/stage3.c
 diff /tmp/stage2.c /tmp/stage3.c && echo "✓ FIXPOINT"
 
-# 5. Replace binary (only after fixpoint passes).
-cp /tmp/stage2 bootstrap/bin/chasm-macos-arm64
+# 6. Replace binary (only after fixpoint passes).
+cp /tmp/stage2_bin bootstrap/bin/chasm-macos-arm64
+chmod +x bootstrap/bin/chasm-macos-arm64
 ```
 
-`chasm_harness.c` is written to `/tmp/` automatically by the CLI on first run. If you need it before running the CLI, see `cmd/cli/cli.go` (`writeStandaloneHarness`).
+Then rebuild the CLI to pick up any changes:
+
+```bash
+go build -ldflags "-X main.defaultChasmHome=$(pwd)" -o ~/.local/bin/chasm ./cmd/cli
+```
 
 ---
 

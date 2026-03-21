@@ -3,6 +3,9 @@
 def main() do
   src = file_read("/tmp/sema_combined.chasm")
 
+  # Check for --target wasm flag in a second file
+  target = file_read("/tmp/chasm_target.txt")
+
   tokens  = lex(src)
   pool    :: []Node = make_node_pool(60000)
   ch      :: []int  = make_int_pool(120000)
@@ -19,5 +22,9 @@ def main() do
   fns     = collect_fn_list(pool, ch, root, structs)
   sema_all(pool, ch, root, types, syms, fns, structs, fields)
 
-  codegen(pool, ch, root, types, structs, fields, fns)
+  if target == "wasm" do
+    wasm_codegen(pool, ch, root, types, structs, fields, fns)
+  else
+    codegen(pool, ch, root, types, structs, fields, fns)
+  end
 end

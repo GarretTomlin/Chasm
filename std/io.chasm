@@ -1,34 +1,39 @@
-# std/io.chasm — Console, file I/O, and time.
+# std/io.chasm — Console, file I/O, and time utilities.
 # Import with: import "io"
-
-# ---- C-backed primitives ---------------------------------------------------
-extern fn print(v: int) -> void
-extern fn print_f(v: float) -> void
-extern fn print_s(v: str) -> void
-extern fn print_b(v: bool) -> void
-extern fn log(v: int) -> void
-extern fn assert(cond: bool) -> void
-extern fn assert_eq(a: int, b: int) -> void
-extern fn todo() -> void
-extern fn file_read(path: str) -> str
-extern fn file_write(path: str, content: str) -> void
-extern fn file_exists(path: str) -> bool
-extern fn time_now() -> float
-extern fn time_ms() -> int
-
-# ---- Pure Chasm utilities --------------------------------------------------
+#
+# Core I/O functions (print, log, assert, todo, file_read, file_write,
+# file_exists, time_now, time_ms) are built-in and need no import.
+# This module provides labelled print helpers and simple formatting.
 
 # Print a labelled integer value: "label: 42"
 defp print_label(label :: string, v :: int) do
-  print_s(str_concat(str_concat(label, ": "), int_to_str(v)))
+  print(str_concat(str_concat(label, ": "), int_to_str(v)))
 end
 
 # Print a labelled float value: "label: 3.14"
 defp print_label_f(label :: string, v :: float) do
-  print_s(str_concat(str_concat(label, ": "), float_to_str(v)))
+  print(str_concat(str_concat(label, ": "), float_to_str(v)))
+end
+
+# Print a labelled bool value: "label: true"
+defp print_label_b(label :: string, v :: bool) do
+  print(str_concat(str_concat(label, ": "), bool_to_str(v)))
 end
 
 # Print a separator line of dashes.
 defp print_sep() do
-  print_s("---")
+  print("---")
+end
+
+# Print a blank line.
+defp print_nl() do
+  print("")
+end
+
+# Assert with a message — aborts with label if cond is false.
+defp assert_msg(cond :: bool, msg :: string) do
+  if cond == false do
+    print(str_concat("assertion failed: ", msg))
+    assert(false)
+  end
 end
