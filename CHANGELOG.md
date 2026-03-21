@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1] — 2026-03-21 — Bug fix: struct literal lookahead
+
+### Bug fixes
+
+- `parser.chasm`: `Name { ... }` is now only parsed as a struct literal when the token after `{` is an `:ident` (field name). Previously, `match state { :normal => ... }` had `state{` consumed as a struct literal, swallowing all match arms as field inits and producing garbage C output.
+- Bootstrap binary rebuilt and fixpoint verified.
+
+---
+
 ## [0.4.0] — 2026-03-21 — Language features + bootstrap arena fix
 
 ### Summary
