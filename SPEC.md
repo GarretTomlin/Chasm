@@ -59,7 +59,7 @@ Values can only flow **upward** — from shorter to longer lifetimes. Assigning 
 
 | Type | Description | Examples |
 |---|---|---|
-| `int` | 64-bit signed integer | `0`, `42`, `-7` |
+| `int` | 64-bit signed integer | `0`, `42`, `-7`, `0xff` |
 | `float` | 64-bit IEEE 754 float | `0.0`, `3.14`, `-1.5` |
 | `bool` | Boolean | `true`, `false` |
 | `string` | Immutable UTF-8 byte string | `"hello"` |
@@ -68,6 +68,14 @@ Values can only flow **upward** — from shorter to longer lifetimes. Assigning 
 | `strbuild` | Mutable string builder | `str_builder_new()` |
 | `StructName` | User-defined struct (value type) | `Vec2 { x: 0.0, y: 0.0 }` |
 | `EnumName` | Tagged enum (with optional payload) | `State.Idle` |
+
+Integer literals can be written in decimal or hexadecimal (`0x` prefix):
+
+```chasm
+x   :: int = 255
+hex :: int = 0xff          # same value
+color :: int = 0x181820ff  # RGBA packed color
+```
 
 Type annotations use `::`:
 
@@ -133,12 +141,115 @@ msg :: string = "score: #{@score}"
 
 ### Module Attributes
 
-Module attributes are global state declared at the top of a file. They use the `@` prefix and require an explicit lifetime annotation.
+Module attributes (`@name`) are module-level variables declared at file scope. They use the `@` prefix and persist across function calls for the duration of their lifetime. Unlike local variables they are not stack-allocated — the compiler emits them as C `static` globals and initializes them in a `chasm_module_init` function called once before the script runs.
+
+#### Declaration syntax
+
+```
+@name :: lifetime = expr
+```
+
+- `@name` — the attribute name. The leading `@` is part of the name everywhere it appears.
+- `:: lifetime` — one of `frame`, `script`, or `persistent`.
+- `= expr` — initializer evaluated at module init time.
 
 ```chasm
 @score      :: script     = 0
 @high_score :: persistent = 0
-@frame_temp :: frame      = 0.0
+@speed      :: script     = 400.0
+@bg_color   :: script     = 0x181820ff
+```
+
+#### Reading an attribute
+
+Use `@name` anywhere an expression is valid:
+
+```chasm
+def on_tick(dt :: float) do
+  new_x = player_x + @speed * dt
+  draw_text("score: #{@score}", 10, 10, 20, 0xffffffff)
+end
+```
+
+#### Assigning an attribute
+
+Assign to `@name` inside a function body with a plain `=`:
+
+```chasm
+def on_hit() do
+  @score = @score + 100
+  if @score > @high_score do
+    @high_score = @score
+  end
+end
+```
+
+Attribute assignment is a statement, not an expression. It cannot appear on the right-hand side of another assignment.
+
+#### Lifetime rules
+
+`@attr` lifetimes follow the same hierarchy as local variables:
+
+| Lifetime | Lives until |
+|---|---|
+| `:: frame` | End of the current tick (reset by the engine before each call) |
+| `:: script` | Hot-reload or explicit reset |
+| `:: persistent` | Process exit |
+
+An `@frame` attribute is re-initialized on every tick. An `@script` attribute survives across ticks but is reset on hot-reload. An `@persistent` attribute is never reset.
+
+You cannot assign a shorter-lived value to a longer-lived attribute without explicit promotion:
+
+```chasm
+@saved :: persistent = persist_copy(computed_value)
+```
+
+#### Code generation
+
+For each `@attr` declaration the compiler emits:
+
+```c
+static <type> g_<name>;   /* e.g. static double g_speed; */
+```
+
+All initializers are gathered into a single function:
+
+```c
+void chasm_module_init(ChasmCtx *ctx) {
+    g_score      = 0;
+    g_high_score = 0;
+    g_speed      = 400.0;
+    g_bg_color   = 0x181820ff;
+}
+```
+
+The generated harness calls `chasm_module_init` once before `chasm_main`.
+
+#### Common patterns
+
+```chasm
+# Counter that survives frames
+@ticks :: script = 0
+
+def on_tick(dt :: float) do
+  @ticks = @ticks + 1
+end
+
+# High score that survives reload
+@best :: persistent = 0
+
+def record(score :: int) do
+  if score > @best do
+    @best = score
+  end
+end
+
+# Preloaded resource handle
+@font :: script = 0
+
+def init() do
+  @font = load_font("assets/mono.ttf")
+end
 ```
 
 ### Functions

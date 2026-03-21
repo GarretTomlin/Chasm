@@ -62,14 +62,23 @@ The memory model is also what makes hot-reload safe. When a script is reloaded, 
 
 ## Installation
 
+Requires [Go](https://go.dev/dl/) 1.21+.
+
 ```bash
 git clone <repo>
 cd chasm
-./install.sh            # installs to ~/.local/bin
-./install.sh /usr/local # installs system-wide
+go run ./cmd/shazam             # installs to ~/.local/bin
+go run ./cmd/shazam /usr/local  # installs system-wide
 ```
 
-Installs the pre-built `chasm` binary and the Cursor/VS Code extension. No Zig required.
+`shazam` builds the `chasm` CLI from source, bakes in the repo path, and installs the Cursor/VS Code extension. No Zig required.
+
+After install:
+
+```bash
+chasm run examples/hello/hello.chasm
+chasm run --engine raylib examples/game/example.chasm
+```
 
 > **Platform support:** macOS arm64. To build for other platforms, see `archive/zig-compiler/`.
 

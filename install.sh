@@ -36,7 +36,8 @@ if ! command -v go &>/dev/null; then
 fi
 
 echo "building chasm CLI..."
-go build -o "$BIN_DIR/chasm" "$SCRIPT_DIR/cmd/chasm/"
+go build -ldflags "-X main.defaultChasmHome=$SCRIPT_DIR" \
+    -o "$BIN_DIR/chasm" "$SCRIPT_DIR/cmd/cli/"
 
 echo ""
 echo "Installed:"

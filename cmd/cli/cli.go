@@ -21,6 +21,11 @@ import (
 
 const version = "0.2.0"
 
+// defaultChasmHome is baked in at build time by install.sh:
+//   go build -ldflags "-X main.defaultChasmHome=/path/to/repo"
+// Falls back to CHASM_HOME env var or executable-walk detection.
+var defaultChasmHome string
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -252,22 +257,37 @@ int main(void) {
 // Checks $CHASM_HOME first, then walks up from the running executable
 // looking for a bootstrap/ directory.
 func chasmHome() string {
+	// 1. Explicit env override always wins.
 	if h := os.Getenv("CHASM_HOME"); h != "" {
 		return h
 	}
+	// 2. Path baked in at build time by install.sh.
+	if defaultChasmHome != "" {
+		if _, err := os.Stat(filepath.Join(defaultChasmHome, "bootstrap")); err == nil {
+			return defaultChasmHome
+		}
+	}
+	// 3. Walk up from the executable (works when running from the repo).
 	exe, err := os.Executable()
 	if err == nil {
+		// Resolve symlinks so the walk works even if the binary is symlinked.
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
 		dir := filepath.Dir(exe)
-		for i := 0; i < 8; i++ {
+		for i := 0; i < 10; i++ {
 			if _, err := os.Stat(filepath.Join(dir, "bootstrap")); err == nil {
 				return dir
 			}
-			dir = filepath.Dir(dir)
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
 		}
 	}
-	// Last resort: current working directory.
-	cwd, _ := os.Getwd()
-	return cwd
+	fatalf("cannot locate Chasm repo.\n\nSet CHASM_HOME to the repo root and try again:\n  export CHASM_HOME=/path/to/chasm\n\nOr reinstall with:\n  cd /path/to/chasm && ./install.sh\n")
+	return ""
 }
 
 func bootstrapBin() string {
@@ -290,13 +310,18 @@ func engineDir() string {
 }
 
 func raylibDir() string {
-	// Prefer OS-arch specific directory.
 	base := engineDir()
-	entries, _ := filepath.Glob(filepath.Join(base, "raylib-*_macos"))
+	// Normalise GOOS to match directory naming (darwin → macos).
+	osName := runtime.GOOS
+	if osName == "darwin" {
+		osName = "macos"
+	}
+	// Try versioned directory first (e.g. raylib-5.5_macos), then plain.
+	entries, _ := filepath.Glob(filepath.Join(base, "raylib-*_"+osName))
 	if len(entries) > 0 {
 		return entries[0]
 	}
-	return filepath.Join(base, "raylib-5.5_macos")
+	return filepath.Join(base, "raylib-5.5_"+osName)
 }
 
 func raylibChasmPath() string {
