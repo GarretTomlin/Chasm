@@ -226,7 +226,7 @@ defp parse_primary(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp
       np = alloc_node(pool, np, :call, cs, arg_list.len, 0, name, line, col)
       return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
     end
-    if tok_kind(tokens, pos) == :lbrace do
+    if tok_kind(tokens, pos) == :lbrace and tok_kind(tokens, pos + 1) == :ident do
       pos = pos + 1
       fi_list :: []int = []
       while tok_kind(tokens, pos) != :rbrace and tok_kind(tokens, pos) != :eof do
