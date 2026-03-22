@@ -1,0 +1,7 @@
+@score      :: script     = 0
+@high_score :: persistent = 0
+
+def on_tick(dt :: float) do
+  @score = copy_to_script(42)
+  @high_score = persist_copy(42)
+end

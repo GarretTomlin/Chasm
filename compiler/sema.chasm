@@ -67,9 +67,11 @@ end
 # ---- Function signature registry ---------------------------------------------
 
 defstruct FnSig do
-  name     :: string
-  ret_tid  :: int
-  node_idx :: int
+  name         :: string
+  ret_tid      :: int
+  node_idx     :: int
+  params_start :: int
+  params_count :: int
 end
 
 defp fnsig_lookup(fns :: []FnSig, name :: string) :: int do
@@ -82,6 +84,52 @@ defp fnsig_lookup(fns :: []FnSig, name :: string) :: int do
     i = i + 1
   end
   return 0
+end
+
+# ---- AttrInfo: per-@attr lifetime and type info ------------------------------
+
+defstruct AttrInfo do
+  name     :: string
+  lifetime :: int
+  type_id  :: int
+  line     :: int
+end
+
+defp attr_info_lookup(attrs :: []AttrInfo, name :: string) :: int do
+  i = 0
+  while i < attrs.len do
+    a = attrs.get(i)
+    if a.name == name do return i end
+    i = i + 1
+  end
+  return -1
+end
+
+# ---- Lifetime inference for RHS expressions ----------------------------------
+# Returns: 1=frame (local/computed), 2=script, 3=persistent
+# Heuristic: @attr references carry the attr's lifetime; everything else is frame.
+
+defp expr_lifetime(pool :: []Node, ch :: []int, attrs :: []AttrInfo, idx :: int) :: int do
+  if idx < 0 do return 1 end
+  node = pool.get(idx)
+  tag  = node.tag
+  # @attr reference — look up its declared lifetime
+  if tag == :at_ref do
+    ai = attr_info_lookup(attrs, node.name)
+    if ai >= 0 do
+      a = attrs.get(ai)
+      return a.lifetime
+    end
+    return 1
+  end
+  # Promotion calls promote to their target lifetime
+  if tag == :call do
+    if node.name == "copy_to_script" do return 2 end
+    if node.name == "persist_copy"   do return 3 end
+    return 1
+  end
+  # Literals and local computations are frame-lifetime
+  return 1
 end
 
 # ---- Struct type registry ----------------------------------------------------
@@ -183,8 +231,13 @@ defp builtin_ret(name :: string) :: int do
   if name == "rand_range"      do return 2 end
   # array-returning
   if name == "array_new"       do return 7 end
+  # promotion functions — passthrough; we return 1 to suppress E005 (type is arg-dependent)
+  if name == "copy_to_script"  do return 1 end
+  if name == "persist_copy"    do return 1 end
   # void
   if name == "print"           do return 6 end
+  if name == "eprint"          do return 6 end
+  if name == "exit"            do return 6 end
   return 0
 end
 
@@ -283,7 +336,7 @@ defp collect_fn_list(pool :: []Node, ch :: []int, root :: int, structs :: []Stru
     if decl.tag == :fn_decl or decl.tag == :extern_decl do
       fname   = fn_split_name(decl.name)
       ret_tid = fn_split_ret(decl.name, structs)
-      sig :: FnSig = FnSig{ name: fname, ret_tid: ret_tid, node_idx: decl_idx }
+      sig :: FnSig = FnSig{ name: fname, ret_tid: ret_tid, node_idx: decl_idx, params_start: decl.a, params_count: decl.b }
       result.push(sig)
     end
     i = i + 1
@@ -293,10 +346,12 @@ end
 
 # ---- Pass 2: walk expression -------------------------------------------------
 # Returns type_id of the expression. Sets types[idx] as a side effect.
+# dc is threaded through and returned so error detectors can emit diagnostics.
 
 defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
                syms :: []Sym, sym_len :: int,
                fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
+               dc :: DiagCollector, src :: string, file :: string,
                idx :: int) :: int do
   if idx < 0 do return 0 end
   node = pool.get(idx)
@@ -311,20 +366,25 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
 
   if tag == :ident do
     tid = sym_lookup(syms, sym_len, node.name)
+    if sym_contains(syms, sym_len, node.name) == false do
+      snip  = extract_snippet(src, node.line)
+      caret = make_caret(node.col, str_len(node.name))
+      d :: Diagnostic = Diagnostic{ code: "E001", category: "undefined variable", file: file, line: node.line, col: node.col, message: str_concat("undefined variable `", str_concat(node.name, "`")), snippet: snip, caret: caret, help: str_concat("`", str_concat(node.name, "` is not defined in this scope")) }
+      dc = diag_emit(dc, d)
+    end
     types.set(idx, tid)
     return tid
   end
 
   if tag == :at_ref do
-    # Look up the @attr type from syms (stored with "@name" key)
     tid = sym_lookup(syms, sym_len, node.name)
     types.set(idx, tid)
     return tid
   end
 
   if tag == :binop do
-    lt = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
-    rt = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.b)
+    lt = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+    rt = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
     op = node.name
     if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" do
       types.set(idx, 3)
@@ -334,7 +394,6 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
       types.set(idx, 3)
       return 3
     end
-    # arithmetic: float wins
     tid = lt
     if rt == 2 do tid = 2 end
     types.set(idx, tid)
@@ -342,7 +401,7 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :unary do
-    st = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
+    st = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     if node.name == "not" do
       types.set(idx, 3)
       return 3
@@ -352,34 +411,68 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :call do
-    # Walk args
     cs = node.a
     cl = node.b
     ai = 0
     while ai < cl do
       arg_idx = ch.get(cs + ai)
-      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, arg_idx)
+      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, arg_idx)
       ai = ai + 1
     end
     # Look up return type: user fn first, then built-ins
     ret = fnsig_lookup(fns, node.name)
     if ret == 0 do
       ret = builtin_ret(node.name)
+      if ret == 0 do
+        # E005: unknown function
+        snip  = extract_snippet(src, node.line)
+        caret = make_caret(node.col, str_len(node.name))
+        # Build candidate list for "did you mean?"
+        fn_names :: []string = []
+        fi = 0
+        while fi < fns.len do
+          fn_names.push(fns.get(fi).name)
+          fi = fi + 1
+        end
+        suggestion = closest_match(fn_names, node.name)
+        help_str = str_concat("no function named `", str_concat(node.name, "` is defined"))
+        if str_len(suggestion) > 0 do
+          help_str = str_concat("did you mean `", str_concat(suggestion, "`?"))
+        end
+        d :: Diagnostic = Diagnostic{ code: "E005", category: "unknown function", file: file, line: node.line, col: node.col, message: str_concat("no function named `", str_concat(node.name, "` is defined")), snippet: snip, caret: caret, help: help_str }
+        dc = diag_emit(dc, d)
+      end
+    else
+      # E003: wrong argument count for user-defined functions
+      fi2 = 0
+      while fi2 < fns.len do
+        fsig = fns.get(fi2)
+        if fsig.name == node.name do
+          if fsig.params_count != cl do
+            snip  = extract_snippet(src, node.line)
+            caret = make_caret(node.col, str_len(node.name))
+            msg   = str_concat("`", str_concat(node.name, str_concat("` expects ", str_concat(int_to_str(fsig.params_count), str_concat(" argument(s), got ", int_to_str(cl))))))
+            d :: Diagnostic = Diagnostic{ code: "E003", category: "wrong argument count", file: file, line: node.line, col: node.col, message: msg, snippet: snip, caret: caret, help: str_concat("function `", str_concat(node.name, "` is declared in this file")) }
+            dc = diag_emit(dc, d)
+          end
+          fi2 = fns.len
+        end
+        fi2 = fi2 + 1
+      end
     end
     types.set(idx, ret)
     return ret
   end
 
   if tag == :method_call do
-    recv_t    = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
+    recv_t    = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     recv_node = pool.get(node.a)
-    # Walk args (b=args_start in ch, c=args_len)
     cs = node.b
     cl = node.c
     ai = 0
     while ai < cl do
       arg_idx = ch.get(cs + ai)
-      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, arg_idx)
+      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, arg_idx)
       ai = ai + 1
     end
     mn = node.name
@@ -394,11 +487,7 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
       types.set(idx, elem_t)
       return elem_t
     end
-    # Namespace call: receiver is an undeclared ident (e.g. utils.add(...))
-    # Look up the method name as a plain function in fns.
-    # Also handles enum constructors: Shape.Circle(val) → type is Shape's type_id.
     if recv_node.tag == :ident do
-      # Check if receiver names an enum type — constructor call
       si = 0
       while si < structs.len do
         sd = structs.get(si)
@@ -425,29 +514,59 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :field_get do
-    obj_t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
+    obj_t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     ft    = field_lookup(fields, obj_t, node.name)
+    if ft == 0 and obj_t > 9 do
+      # E007: undefined struct field
+      struct_name = ""
+      si = 0
+      while si < structs.len do
+        sd = structs.get(si)
+        if sd.type_id == obj_t do struct_name = sd.name end
+        si = si + 1
+      end
+      if str_len(struct_name) > 0 do
+        # Build candidate field names for this struct
+        field_names :: []string = []
+        fi = 0
+        while fi < fields.len do
+          fd = fields.get(fi)
+          if fd.struct_tid == obj_t do field_names.push(fd.name) end
+          fi = fi + 1
+        end
+        suggestion = closest_match(field_names, node.name)
+        help_str = ""
+        if str_len(suggestion) > 0 do
+          help_str = str_concat("did you mean `", str_concat(suggestion, "`?"))
+        end
+        snip  = extract_snippet(src, node.line)
+        caret = make_caret(node.col, str_len(node.name))
+        msg   = str_concat("struct `", str_concat(struct_name, str_concat("` has no field `", str_concat(node.name, "`"))))
+        d :: Diagnostic = Diagnostic{ code: "E007", category: "undefined struct field", file: file, line: node.line, col: node.col, message: msg, snippet: snip, caret: caret, help: help_str }
+        dc = diag_emit(dc, d)
+      end
+    end
     types.set(idx, ft)
     return ft
   end
 
   if tag == :index do
-    _t  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
-    _t2 = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.b)
+    _t  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+    _t2 = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
     types.set(idx, 0)
     return 0
   end
 
   if tag == :match_expr do
-    _t  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
+    _t  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     as  = node.b
     al  = node.c
-    ret = 1  # default: int
+    ret = 1
     ai  = 0
     while ai < al do
       arm_idx = ch.get(as + ai)
       arm     = pool.get(arm_idx)
-      arm_t   = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, arm.a)
+      arm_t   = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, arm.a)
       if ai == 0 do ret = arm_t end
       ai = ai + 1
     end
@@ -456,36 +575,32 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :pipe_expr do
-    # a |> f(b) — lhs is piped as first arg to rhs call
-    _lt = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
-    rt  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.b)
+    _lt = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+    rt  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
     types.set(idx, rt)
     return rt
   end
 
   if tag == :interp_expr do
-    # String interpolation fragment — wraps an expression, result is string
-    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
+    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     types.set(idx, 4)
     return 4
   end
 
   if tag == :range_expr do
-    # lo..hi — produces an array of ints
-    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
-    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.b)
+    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
     types.set(idx, 7)
     return 7
   end
 
   if tag == :tuple_lit do
-    # Multiple return values — walk all children
     ts = node.a
     tl = node.b
     ti = 0
     while ti < tl do
       ci = ch.get(ts + ti)
-      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, ci)
+      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, ci)
       ti = ti + 1
     end
     types.set(idx, 9)
@@ -500,7 +615,7 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
     while fi < cl do
       field_node_idx = ch.get(cs + fi)
       fnode = pool.get(field_node_idx)
-      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, fnode.a)
+      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, fnode.a)
       fi = fi + 1
     end
     types.set(idx, tid)
@@ -512,10 +627,14 @@ end
 
 # ---- Pass 2: walk statement --------------------------------------------------
 # Returns updated sym_len (new vars declared in this stmt extend the scope).
+# dc is threaded through all calls; callers must use the returned dc.
 
 defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
                syms :: []Sym, sym_len :: int,
                fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
+               dc :: DiagCollector, src :: string, file :: string,
+               cur_fn_ret :: int, cur_fn_name :: string,
+               attrs :: []AttrInfo,
                idx :: int) :: int do
   if idx < 0 do return sym_len end
   node = pool.get(idx)
@@ -523,13 +642,21 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
 
   # Explicit var decl: name :: type = expr
   if tag == :var_decl do
-    val_t  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.b)
+    val_t  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
     elem_t = 0
-    # Type annotation overrides inferred type; also extract elem type for arrays
+    ann_t  = 0
     if node.c >= 0 do
-      tref     = pool.get(node.c)
-      ann_t    = resolve_type(tref.name, structs)
+      tref  = pool.get(node.c)
+      ann_t = resolve_type(tref.name, structs)
       if ann_t != 0 do
+        # E002: type mismatch on declaration
+        if val_t != 0 and val_t != ann_t do
+          snip  = extract_snippet(src, node.line)
+          caret = make_caret(node.col, str_len(node.name))
+          msg   = str_concat("expected `", str_concat(type_name(ann_t), str_concat("`, found `", str_concat(type_name(val_t), "`"))))
+          d :: Diagnostic = Diagnostic{ code: "E002", category: "type mismatch", file: file, line: node.line, col: node.col, message: msg, snippet: snip, caret: caret, help: "" }
+          dc = diag_emit(dc, d)
+        end
         val_t = ann_t
       end
       if str_len(tref.name) >= 2 do
@@ -544,9 +671,9 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
     return sym_len
   end
 
-  # Assignment: name = expr  (implicit var decl on first use)
+  # Assignment: name = expr
   if tag == :assign do
-    val_t    = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.b)
+    val_t    = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
     lhs_node = pool.get(node.a)
     if lhs_node.tag == :ident do
       already = sym_contains(syms, sym_len, lhs_node.name)
@@ -559,30 +686,39 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :return_stmt do
-    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
+    ret_t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+    # E006: return type mismatch
+    if cur_fn_ret != 0 and cur_fn_ret != 6 and ret_t != 0 and ret_t != cur_fn_ret do
+      snip  = extract_snippet(src, node.line)
+      caret = make_caret(node.col, 6)
+      msg   = str_concat("expected `", str_concat(type_name(cur_fn_ret), str_concat("`, found `", str_concat(type_name(ret_t), "`"))))
+      help  = str_concat("`", str_concat(cur_fn_name, str_concat("` is declared to return `", str_concat(type_name(cur_fn_ret), "`"))))
+      d :: Diagnostic = Diagnostic{ code: "E006", category: "return type mismatch", file: file, line: node.line, col: node.col, message: msg, snippet: snip, caret: caret, help: help }
+      dc = diag_emit(dc, d)
+    end
     return sym_len
   end
 
   if tag == :if_stmt do
-    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
-    sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, node.b)
+    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+    sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, cur_fn_ret, cur_fn_name, attrs, node.b)
     if node.c >= 0 do
-      sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, node.c)
+      sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, cur_fn_ret, cur_fn_name, attrs, node.c)
     end
     return sym_len
   end
 
   if tag == :while_stmt do
-    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
-    sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, node.b)
+    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+    sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, cur_fn_ret, cur_fn_name, attrs, node.b)
     return sym_len
   end
 
   if tag == :for_stmt do
     pre_mark = sym_len
-    _t       = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
+    _t       = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     sym_len  = sym_push(syms, sym_len, node.name, 0, 0)
-    sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, node.b)
+    sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, cur_fn_ret, cur_fn_name, attrs, node.b)
     return pre_mark
   end
 
@@ -591,14 +727,36 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :at_assign do
-    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.b)
+    rhs_t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
+    # E008: lifetime violation — check if rhs lifetime < attr lifetime
+    ai = attr_info_lookup(attrs, node.name)
+    if ai >= 0 do
+      attr_info  = attrs.get(ai)
+      attr_lt    = attr_info.lifetime
+      rhs_lt     = expr_lifetime(pool, ch, attrs, node.b)
+      if attr_lt > 1 and rhs_lt < attr_lt do
+        snip  = extract_snippet(src, node.line)
+        caret = make_caret(node.col, str_len(node.name))
+        lt_names :: []string = []
+        lt_names.push("unknown")
+        lt_names.push("frame")
+        lt_names.push("script")
+        lt_names.push("persistent")
+        rhs_lt_name  = lt_names.get(rhs_lt)
+        attr_lt_name = lt_names.get(attr_lt)
+        msg  = str_concat("cannot assign `", str_concat(rhs_lt_name, str_concat("` value to `", str_concat(attr_lt_name, str_concat("` binding `@", str_concat(node.name, "`"))))))
+        help = ""
+        if attr_lt == 2 do help = "use `copy_to_script()` to promote this value" end
+        if attr_lt == 3 do help = "use `persist_copy()` to promote this value" end
+        d :: Diagnostic = Diagnostic{ code: "E008", category: "lifetime violation", file: file, line: node.line, col: node.col, message: msg, snippet: snip, caret: caret, help: help }
+        dc = diag_emit(dc, d)
+      end
+    end
     return sym_len
   end
 
   if tag == :tuple_dest do
-    # a, b = expr — register each lhs name as int (type 1) for now
-    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, node.a)
-    # Parse comma-separated names from node.name
+    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     names = node.name
     ni    = 0
     start = 0
@@ -626,18 +784,19 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
     return sym_len
   end
 
-  # Expression statement (call, method_call, etc.)
-  _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, idx)
+  # Expression statement
+  _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, idx)
   return sym_len
 end
 
 # ---- Pass 2: walk a block ----------------------------------------------------
-# sym_len is a value parameter — additions are local to this function.
-# Caller's sym_len is unchanged after return (scope is discarded).
 
 defp sema_block(pool :: []Node, ch :: []int, types :: []int,
                 syms :: []Sym, sym_len :: int,
                 fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
+                dc :: DiagCollector, src :: string, file :: string,
+                cur_fn_ret :: int, cur_fn_name :: string,
+                attrs :: []AttrInfo,
                 block_idx :: int) do
   if block_idx < 0 do return end
   node = pool.get(block_idx)
@@ -646,7 +805,7 @@ defp sema_block(pool :: []Node, ch :: []int, types :: []int,
   i    = 0
   while i < cl do
     child   = ch.get(cs + i)
-    sym_len = sema_stmt(pool, ch, types, syms, sym_len, fns, structs, fields, child)
+    sym_len = sema_stmt(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, cur_fn_ret, cur_fn_name, attrs, child)
     i = i + 1
   end
 end
@@ -656,12 +815,16 @@ end
 defp sema_fn(pool :: []Node, ch :: []int, types :: []int,
              syms :: []Sym,
              fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
-             fn_idx :: int, attr_sym_len :: int) do
+             dc :: DiagCollector, src :: string, file :: string,
+             fn_idx :: int, attr_sym_len :: int, attrs :: []AttrInfo) do
   fn_node      = pool.get(fn_idx)
-  params_start = fn_node.a  # index into ch
+  params_start = fn_node.a
   params_count = fn_node.b
   body         = fn_node.c
-  # Start with @attr scope so @attrs are visible inside functions
+  # Determine return type and name for E006 checking
+  fn_name_full = fn_node.name
+  fn_name      = fn_split_name(fn_name_full)
+  fn_ret       = fn_split_ret(fn_name_full, structs)
   sym_len = attr_sym_len
   i       = 0
   while i < params_count do
@@ -679,18 +842,20 @@ defp sema_fn(pool :: []Node, ch :: []int, types :: []int,
     sym_len    = sym_push(syms, sym_len, param_node.name, param_tid, param_et)
     i = i + 1
   end
-  sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, body)
+  sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, fn_ret, fn_name, attrs, body)
 end
 
 # ---- Main sema entry point ---------------------------------------------------
 
 defp sema_all(pool :: []Node, ch :: []int, root :: int,
               types :: []int, syms :: []Sym,
-              fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef) do
+              fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
+              src :: string, file :: string, dc :: DiagCollector) :: DiagCollector do
   root_node = pool.get(root)
   cs = root_node.a
   cl = root_node.b
-  # Pass 0: pre-populate @attr types into syms so they're visible inside functions.
+  # Pass 0: pre-populate @attr types into syms and build AttrInfo list.
+  attrs        :: []AttrInfo = []
   attr_sym_len = 0
   i = 0
   while i < cl do
@@ -698,8 +863,10 @@ defp sema_all(pool :: []Node, ch :: []int, root :: int,
     decl     = pool.get(decl_idx)
     if decl.tag == :at_decl do
       init_idx = decl.a
-      init_t   = sema_expr(pool, ch, types, syms, attr_sym_len, fns, structs, fields, init_idx)
+      init_t   = sema_expr(pool, ch, types, syms, attr_sym_len, fns, structs, fields, dc, src, file, init_idx)
       attr_sym_len = sym_push(syms, attr_sym_len, decl.name, init_t, 0)
+      ai :: AttrInfo = AttrInfo{ name: decl.name, lifetime: decl.b, type_id: init_t, line: decl.line }
+      attrs.push(ai)
     end
     i = i + 1
   end
@@ -709,10 +876,11 @@ defp sema_all(pool :: []Node, ch :: []int, root :: int,
     decl_idx = ch.get(cs + i)
     decl     = pool.get(decl_idx)
     if decl.tag == :fn_decl do
-      sema_fn(pool, ch, types, syms, fns, structs, fields, decl_idx, attr_sym_len)
+      sema_fn(pool, ch, types, syms, fns, structs, fields, dc, src, file, decl_idx, attr_sym_len, attrs)
     end
     i = i + 1
   end
+  return dc
 end
 
 defp type_name(tid :: int) :: string do
@@ -727,4 +895,192 @@ defp type_name(tid :: int) :: string do
   if tid == 8 do return "strbuild" end
   if tid == 9 do return "tuple" end
   return str_concat("struct#", int_to_str(tid))
+end
+
+# ---- Diagnostic infrastructure -----------------------------------------------
+
+defstruct Diagnostic do
+  code     :: string
+  category :: string
+  file     :: string
+  line     :: int
+  col      :: int
+  message  :: string
+  snippet  :: string
+  caret    :: string
+  help     :: string
+end
+
+defstruct DiagCollector do
+  diags    :: []Diagnostic
+  count_v  :: []int
+end
+
+defp make_diag_collector() :: DiagCollector do
+  pool  :: []Diagnostic = []
+  empty :: Diagnostic   = Diagnostic{ code: "", category: "", file: "", line: 0, col: 0, message: "", snippet: "", caret: "", help: "" }
+  i = 0
+  while i < 256 do
+    pool.push(empty)
+    i = i + 1
+  end
+  cv :: []int = []
+  cv.push(0)
+  dc :: DiagCollector = DiagCollector{ diags: pool, count_v: cv }
+  return dc
+end
+
+defp diag_emit(dc :: DiagCollector, d :: Diagnostic) :: DiagCollector do
+  n = dc.count_v.get(0)
+  if n < 256 do
+    diags :: []Diagnostic = dc.diags
+    diags.set(n, d)
+    dc.count_v.set(0, n + 1)
+  end
+  return dc
+end
+
+defp diag_count(dc :: DiagCollector) :: int do
+  return dc.count_v.get(0)
+end
+
+defp diag_has_errors(dc :: DiagCollector) :: bool do
+  return dc.count_v.get(0) > 0
+end
+
+# ---- Snippet extraction and caret builder ------------------------------------
+
+defp extract_snippet(src :: string, line :: int) :: string do
+  if line <= 0 do return "" end
+  n       = str_len(src)
+  cur_line = 1
+  start   = 0
+  i       = 0
+  while i < n do
+    c = str_char_at(src, i)
+    if c == 10 do
+      if cur_line == line do
+        return str_slice(src, start, i)
+      end
+      cur_line = cur_line + 1
+      start    = i + 1
+    end
+    i = i + 1
+  end
+  # Last line (no trailing newline)
+  if cur_line == line do
+    return str_slice(src, start, n)
+  end
+  return ""
+end
+
+defp make_caret(col :: int, len :: int) :: string do
+  actual_len = len
+  if actual_len < 1 do actual_len = 1 end
+  spaces = ""
+  si = 1
+  while si < col do
+    spaces = str_concat(spaces, " ")
+    si = si + 1
+  end
+  carets = ""
+  ci = 0
+  while ci < actual_len do
+    carets = str_concat(carets, "^")
+    ci = ci + 1
+  end
+  return str_concat(spaces, carets)
+end
+
+# ---- Diagnostic renderer -----------------------------------------------------
+
+defp render_diagnostic(d :: Diagnostic) :: string do
+  line_s  = int_to_str(d.line)
+  pad     = " "
+  gutter  = str_concat(pad, str_concat(line_s, " "))
+  blank_g = str_repeat(" ", str_len(gutter))
+  nl      = "\n"
+  header  = str_concat("error[", str_concat(d.code, str_concat("]: ", str_concat(d.category, nl))))
+  arrow   = str_concat("  --> ", str_concat(d.file, str_concat(":", str_concat(line_s, str_concat(":", str_concat(int_to_str(d.col), nl))))))
+  sep1    = str_concat(blank_g, str_concat("|", nl))
+  code_ln = str_concat(gutter, str_concat("| ", str_concat(d.snippet, nl)))
+  caret_l = str_concat(blank_g, str_concat("|   ", str_concat(d.caret, nl)))
+  sep2    = str_concat(blank_g, str_concat("|", nl))
+  result  = str_concat(header, str_concat(arrow, str_concat(sep1, str_concat(code_ln, str_concat(caret_l, sep2)))))
+  if str_len(d.help) > 0 do
+    help_l = str_concat(blank_g, str_concat("= help: ", str_concat(d.help, nl)))
+    result = str_concat(result, help_l)
+  end
+  return result
+end
+
+defp render_all_diags(dc :: DiagCollector) do
+  n     = dc.count_v.get(0)
+  diags :: []Diagnostic = dc.diags
+  i = 0
+  while i < n do
+    d = diags.get(i)
+    eprint(render_diagnostic(d))
+    i = i + 1
+  end
+end
+
+# ---- Levenshtein distance and closest_match ----------------------------------
+
+defp levenshtein(a :: string, b :: string) :: int do
+  la = str_len(a)
+  lb = str_len(b)
+  if la == 0 do return lb end
+  if lb == 0 do return la end
+  # Two-row DP
+  prev :: []int = []
+  curr :: []int = []
+  j = 0
+  while j <= lb do
+    prev.push(j)
+    curr.push(0)
+    j = j + 1
+  end
+  i = 1
+  while i <= la do
+    curr.set(0, i)
+    j = 1
+    while j <= lb do
+      ca = str_char_at(a, i - 1)
+      cb = str_char_at(b, j - 1)
+      cost = 1
+      if ca == cb do cost = 0 end
+      del_cost = prev.get(j) + 1
+      ins_cost = curr.get(j - 1) + 1
+      sub_cost = prev.get(j - 1) + cost
+      best = del_cost
+      if ins_cost < best do best = ins_cost end
+      if sub_cost < best do best = sub_cost end
+      curr.set(j, best)
+      j = j + 1
+    end
+    # swap prev and curr
+    tmp :: []int = prev
+    prev = curr
+    curr = tmp
+    i = i + 1
+  end
+  return prev.get(lb)
+end
+
+defp closest_match(candidates :: []string, name :: string) :: string do
+  best_dist = 3
+  best_name = ""
+  i = 0
+  while i < candidates.len do
+    cand = candidates.get(i)
+    d    = levenshtein(cand, name)
+    if d < best_dist do
+      best_dist = d
+      best_name = cand
+    end
+    i = i + 1
+  end
+  if best_dist <= 2 do return best_name end
+  return ""
 end

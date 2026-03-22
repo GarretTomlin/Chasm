@@ -20,11 +20,17 @@ def main() do
   structs = collect_struct_list(pool, ch, root, 10)
   fields  = collect_field_list(pool, ch, structs)
   fns     = collect_fn_list(pool, ch, root, structs)
-  sema_all(pool, ch, root, types, syms, fns, structs, fields)
+  dc      = make_diag_collector()
+  dc      = sema_all(pool, ch, root, types, syms, fns, structs, fields, src, "sema_combined.chasm", dc)
 
-  if target == "wasm" do
-    wasm_codegen(pool, ch, root, types, structs, fields, fns)
+  if diag_has_errors(dc) do
+    render_all_diags(dc)
+    exit(1)
   else
-    codegen(pool, ch, root, types, structs, fields, fns)
+    if target == "wasm" do
+      wasm_codegen(pool, ch, root, types, structs, fields, fns)
+    else
+      codegen(pool, ch, root, types, structs, fields, fns)
+    end
   end
 end

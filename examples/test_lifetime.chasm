@@ -1,0 +1,8 @@
+@score      :: script     = 0
+@high_score :: persistent = 0
+
+def on_tick(dt :: float) do
+  computed = 42
+  @score = computed
+  @high_score = computed
+end

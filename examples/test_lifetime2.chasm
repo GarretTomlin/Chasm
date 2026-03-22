@@ -1,0 +1,9 @@
+@ticks  :: frame      = 0
+@saved  :: persistent = 0
+@cache  :: script     = 0
+
+def update() do
+  @ticks = @ticks + 1
+  @cache = @ticks
+  @saved = @cache
+end

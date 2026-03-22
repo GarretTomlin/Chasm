@@ -2,4 +2,4 @@
 .claude
 .zig-cache
 .zig-out
-engine/.chasm_engine_cache
+engine/raylib/.chasm_engine_cache

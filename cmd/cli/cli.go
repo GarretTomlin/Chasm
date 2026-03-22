@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const version = "0.2.0"
+const version = "0.9.0"
 
 // defaultChasmHome is baked in at build time by install.sh:
 //

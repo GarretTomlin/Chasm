@@ -1199,10 +1199,16 @@ defp parse_file(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
       at_line  = tok_line(tokens, pos)
       at_col   = tok_col(tokens, pos)
       pos      = pos + 1
-      # Skip :: lifetime annotation (e.g. :: script, :: frame, :: persistent)
+      # Parse :: lifetime annotation (e.g. :: script, :: frame, :: persistent)
+      # Store lifetime in node.b: 1=frame, 2=script, 3=persistent, 0=unknown
+      at_lifetime = 0
       if tok_kind(tokens, pos) == :colon_colon do
         pos = pos + 1  # skip ::
         if tok_kind(tokens, pos) == :ident do
+          lt_name = tok_lex(tokens, pos)
+          if lt_name == "frame"      do at_lifetime = 1 end
+          if lt_name == "script"     do at_lifetime = 2 end
+          if lt_name == "persistent" do at_lifetime = 3 end
           pos = pos + 1  # skip lifetime name
         end
       end
@@ -1215,7 +1221,7 @@ defp parse_file(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
       cp  = r.cp
       val = r.node_idx
       di  = np
-      np  = alloc_node(pool, np, :at_decl, val, 0, 0, at_name, at_line, at_col)
+      np  = alloc_node(pool, np, :at_decl, val, at_lifetime, 0, at_name, at_line, at_col)
       ch.set(cp, di)
       cp = cp + 1
     end

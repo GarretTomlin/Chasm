@@ -42,7 +42,7 @@ func TestPBT_P1_BindingNamingConvention(t *testing.T) {
 	// Feature: raylib-extended-bindings, Property 1: Binding symbol naming convention
 	// Scope: only the new bindings added by this spec follow the strict rl_<name> convention.
 	// Pre-existing bindings use aliased names (e.g. screen_w → rl_screen_width) by design.
-	f, err := os.Open("../../engine/raylib.chasm")
+	f, err := os.Open("../../engine/raylib/raylib.chasm")
 	if err != nil {
 		t.Fatalf("cannot open raylib.chasm: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestPBT_P10_ClipboardNullGuard(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestUnit_BindingNamingSpotCheck(t *testing.T) {
-	data, err := os.ReadFile("../../engine/raylib.chasm")
+	data, err := os.ReadFile("../../engine/raylib/raylib.chasm")
 	if err != nil {
 		t.Fatalf("cannot read raylib.chasm: %v", err)
 	}

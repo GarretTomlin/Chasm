@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.9.0] — 2026-03-22 — Rich compiler diagnostics + lifetime violation detection
+
+### Summary
+
+The Chasm compiler now emits Rust-style diagnostics to stderr instead of silently producing invalid C. Eight error codes (E001–E008) are detected during semantic analysis, collected without early abort, rendered with source snippets and caret underlines, and the compiler exits non-zero when any error is present. The parser now preserves `@attr` lifetime annotations so E008 (lifetime violation) can be enforced at compile time.
+
+### Diagnostic infrastructure (`compiler/sema.chasm`)
+
+- `Diagnostic` struct: `code`, `category`, `file`, `line`, `col`, `message`, `snippet`, `caret`, `help`.
+- `DiagCollector` struct: pre-allocated pool of 256 diagnostics; uses `count_v :: []int` (single-element array) for mutable reference semantics across value-copy struct passing.
+- `make_diag_collector`, `diag_emit`, `diag_count`, `diag_has_errors`.
+- `extract_snippet(src, line)` — returns the Nth newline-delimited line from the source string (1-indexed).
+- `make_caret(col, len)` — returns `(col-1)` spaces followed by `max(len,1)` `^` characters.
+- `render_diagnostic(d)` — formats one diagnostic in Rust style; `render_all_diags(dc)` calls `eprint` for each.
+- `levenshtein(a, b)` — iterative two-row DP edit distance.
+- `closest_match(candidates, name)` — returns the candidate within edit distance ≤ 2, or `""`.
+
+### Error codes
+
+| Code | Category | Trigger |
+|---|---|---|
+| E001 | undefined variable | `:ident` not in symbol table (`sym_contains` check) |
+| E002 | type mismatch | annotated type ≠ inferred type on `:var_decl` |
+| E003 | wrong argument count | call arg count ≠ `params_count` for user-defined fn |
+| E005 | unknown function | name not in fn registry and not in `builtin_ret`; "did you mean?" via `closest_match` |
+| E006 | return type mismatch | `return` expression type ≠ declared return type |
+| E007 | undefined struct field | `field_lookup` returns 0 for known struct; "did you mean?" via `closest_match` |
+| E008 | lifetime violation | `@attr` assignment where RHS lifetime < attr declared lifetime |
+
+### Lifetime violation detection (E008)
+
+- **Parser** (`compiler/parser.chasm`): `at_decl` parsing now captures the lifetime keyword and stores it as an integer in `node.b` (1=frame, 2=script, 3=persistent) instead of discarding it.
+- **Sema**: `sema_all` pre-pass builds `[]AttrInfo` from `decl.b`; threaded through `sema_fn` → `sema_block` → `sema_stmt`.
+- `expr_lifetime` helper infers RHS lifetime: `@attr` refs carry their declared lifetime; `copy_to_script()` → 2; `persist_copy()` → 3; everything else → 1 (frame).
+- `copy_to_script` and `persist_copy` added to `builtin_ret` (return type 1) so they don't false-positive as E005.
+- E008 emitted with promotion hint: `frame → script` → `use \`copy_to_script()\``; `* → persistent` → `use \`persist_copy()\``.
+
+### Runtime (`runtime/chasm_rt.h`)
+
+- `chasm_eprint(ctx, s)` — writes string to stderr via `fprintf(stderr, "%s", s)`.
+- `chasm_eprint_nl(ctx, s)` — same with trailing newline.
+- `chasm_exit(ctx, code)` — calls `exit((int)code)` for clean non-zero exit.
+
+### Codegen (`compiler/codegen.chasm`)
+
+- `eprint` and `exit` dispatch branches added to `emit_call`.
+
+### Driver (`compiler/main.chasm`)
+
+- `make_diag_collector()` called before `sema_all`.
+- `src` and `"sema_combined.chasm"` threaded into `sema_all`.
+- After sema: if `diag_has_errors(dc)` → `render_all_diags(dc)` + `exit(1)`; otherwise proceed to codegen.
+
+### Property-based tests (`cmd/cli/diag_pbt_test.go`)
+
+New test suite using `pgregory.net/rapid` (100 iterations each):
+
+- **P1** — diagnostic accumulation is monotonic (count = emissions, no record lost)
+- **P2** — snippet extraction round-trip (extracted line equals original line text)
+- **P3** — caret length matches token lexeme length
+- **P4** — rendered diagnostic contains required fields (code, file, line, snippet)
+- **P5** — compiler exits non-zero for source with undefined variable (integration, invokes binary)
+- **P6** — K independent undefined variables produce ≥ K E001 diagnostics (no early abort)
+- **P7** — `closest_match` suggestion is within edit distance 2
+
+### Bootstrap
+
+Bootstrap binary rebuilt and three-stage fixpoint verified (`stage2.c == stage3.c`).
+
 ## [0.8.0] — 2026-03-22 — Raylib extended bindings + multi-engine layout
 
 ### Summary

@@ -318,6 +318,9 @@ static inline void chasm_print(ChasmCtx *ctx, int64_t v)       { (void)ctx; prin
 static inline void chasm_print_f(ChasmCtx *ctx, double v)      { (void)ctx; printf("%g\n", v); }
 static inline void chasm_print_s(ChasmCtx *ctx, const char *v) { (void)ctx; printf("%s\n", v ? v : "(nil)"); }
 static inline void chasm_print_b(ChasmCtx *ctx, bool v)        { (void)ctx; printf("%s\n", v ? "true" : "false"); }
+static inline void chasm_eprint(ChasmCtx *ctx, const char *s)  { (void)ctx; fprintf(stderr, "%s", s ? s : ""); }
+static inline void chasm_eprint_nl(ChasmCtx *ctx, const char *s){ (void)ctx; fprintf(stderr, "%s\n", s ? s : ""); }
+static inline void chasm_exit(ChasmCtx *ctx, int64_t code)     { (void)ctx; exit((int)code); }
 static inline void chasm_log(ChasmCtx *ctx, int64_t v)         { (void)ctx; fprintf(stderr, "[log] %lld\n", (long long)v); }
 static inline void chasm_assert(ChasmCtx *ctx, bool cond) {
     (void)ctx; if (!cond) { fprintf(stderr, "chasm: assertion failed\n"); abort(); }

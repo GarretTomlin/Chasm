@@ -212,6 +212,18 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
         return str_concat("chasm_print(ctx, ", str_concat(args_str, ")"))
       end
     end
+    # Dispatch eprint (always string)
+    if fn_name == "eprint" do
+      if cl == 1 do
+        return str_concat("chasm_eprint(ctx, ", str_concat(args_str, ")"))
+      end
+    end
+    # Dispatch exit
+    if fn_name == "exit" do
+      if cl == 1 do
+        return str_concat("chasm_exit(ctx, ", str_concat(args_str, ")"))
+      end
+    end
     # Default: chasm_name(ctx, args)
     if cl == 0 do
       return str_concat("chasm_", str_concat(fn_name, "(ctx)"))
