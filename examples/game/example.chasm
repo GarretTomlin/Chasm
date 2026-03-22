@@ -10,7 +10,7 @@
 
 defp ball_color(state :: atom) :: int do
   return match state {
-    :normal => 0x4488ffff
+    :normal => 0xFFB6C1FF
     :slow   => 0x44ff88ff
     :boost  => 0xffaa22ff
   }
@@ -18,7 +18,7 @@ end
 
 defp trail_color(state :: atom) :: int do
   return match state {
-    :normal => 0x4488ff33
+    :normal => 0xFFB6C1FF
     :slow   => 0x44ff8833
     :boost  => 0xffaa2233
   }
@@ -82,7 +82,7 @@ def on_draw() do
   draw_circle(@x, @y, @radius, ball_color(@state))
 
   # HUD
-  draw_text("Chasm + Raylib 5.5", 12.0, 12.0, 20, 0xffffffff)
+  draw_text("Chasm + Raylibb 5.6", 12.0, 12.0, 20, 0xffffffff)
   draw_text("SHIFT: slow  |  SPACE: boost", 12.0, 38.0, 16, 0x888888ff)
   draw_text(state_label(@state), 12.0, 60.0, 16, ball_color(@state))
   draw_fps(12.0, 580.0)

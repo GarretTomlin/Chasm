@@ -187,6 +187,97 @@ static inline double rl_mouse_wheel(void)           { return (double)GetMouseWhe
 static inline void   rl_hide_cursor(void)           { HideCursor(); }
 static inline void   rl_show_cursor(void)           { ShowCursor(); }
 
+/* ---- Audio extended ------------------------------------------------------- */
+static inline bool   rl_sound_playing(int64_t h)
+    { return (h > 0 && h < CHASM_RL_MAX_HANDLES) ? IsSoundPlaying(chasm_rl_handles[h].data.sound) : false; }
+static inline void   rl_sound_volume(int64_t h, double vol)
+    { if (h > 0 && h < CHASM_RL_MAX_HANDLES) SetSoundVolume(chasm_rl_handles[h].data.sound, (float)vol); }
+static inline void   rl_sound_pitch(int64_t h, double pitch)
+    { if (h > 0 && h < CHASM_RL_MAX_HANDLES) SetSoundPitch(chasm_rl_handles[h].data.sound, (float)pitch); }
+static inline void   rl_pause_sound(int64_t h)
+    { if (h > 0 && h < CHASM_RL_MAX_HANDLES) PauseSound(chasm_rl_handles[h].data.sound); }
+static inline void   rl_resume_sound(int64_t h)
+    { if (h > 0 && h < CHASM_RL_MAX_HANDLES) ResumeSound(chasm_rl_handles[h].data.sound); }
+static inline bool   rl_music_playing(int64_t h)
+    { return (h > 0 && h < CHASM_RL_MAX_HANDLES) ? IsMusicStreamPlaying(chasm_rl_handles[h].data.music) : false; }
+static inline void   rl_music_volume(int64_t h, double vol)
+    { if (h > 0 && h < CHASM_RL_MAX_HANDLES) SetMusicVolume(chasm_rl_handles[h].data.music, (float)vol); }
+static inline void   rl_music_pitch(int64_t h, double pitch)
+    { if (h > 0 && h < CHASM_RL_MAX_HANDLES) SetMusicPitch(chasm_rl_handles[h].data.music, (float)pitch); }
+static inline double rl_music_length(int64_t h)
+    { return (h > 0 && h < CHASM_RL_MAX_HANDLES) ? (double)GetMusicTimeLength(chasm_rl_handles[h].data.music) : 0.0; }
+static inline double rl_music_played(int64_t h)
+    { return (h > 0 && h < CHASM_RL_MAX_HANDLES) ? (double)GetMusicTimePlayed(chasm_rl_handles[h].data.music) : 0.0; }
+static inline void   rl_pause_music(int64_t h)
+    { if (h > 0 && h < CHASM_RL_MAX_HANDLES) PauseMusicStream(chasm_rl_handles[h].data.music); }
+static inline void   rl_resume_music(int64_t h)
+    { if (h > 0 && h < CHASM_RL_MAX_HANDLES) ResumeMusicStream(chasm_rl_handles[h].data.music); }
+
+/* ---- Window extended ------------------------------------------------------- */
+static inline bool  rl_window_resized(void)           { return IsWindowResized(); }
+static inline void  rl_set_window_size(int64_t w, int64_t h) { SetWindowSize((int)w, (int)h); }
+static inline void  rl_toggle_fullscreen(void)        { ToggleFullscreen(); }
+static inline bool  rl_is_fullscreen(void)            { return IsWindowFullscreen(); }
+static inline bool  rl_window_focused(void)           { return IsWindowFocused(); }
+
+/* ---- Drawing extended ------------------------------------------------------ */
+static inline void rl_draw_triangle(double x1, double y1, double x2, double y2, double x3, double y3, int64_t c)
+    { DrawTriangle((Vector2){(float)x1,(float)y1}, (Vector2){(float)x2,(float)y2}, (Vector2){(float)x3,(float)y3}, CHASM_TO_RL_COLOR(c)); }
+static inline void rl_draw_triangle_lines(double x1, double y1, double x2, double y2, double x3, double y3, int64_t c)
+    { DrawTriangleLines((Vector2){(float)x1,(float)y1}, (Vector2){(float)x2,(float)y2}, (Vector2){(float)x3,(float)y3}, CHASM_TO_RL_COLOR(c)); }
+static inline void rl_draw_ellipse(double cx, double cy, double rx, double ry, int64_t c)
+    { DrawEllipse((int)cx, (int)cy, (float)rx, (float)ry, CHASM_TO_RL_COLOR(c)); }
+static inline void rl_draw_ring(double cx, double cy, double inner, double outer, double start, double end, int64_t segs, int64_t c)
+    { DrawRing((Vector2){(float)cx,(float)cy}, (float)inner, (float)outer, (float)start, (float)end, (int)segs, CHASM_TO_RL_COLOR(c)); }
+static inline void rl_draw_poly(double cx, double cy, int64_t sides, double radius, double rot, int64_t c)
+    { DrawPoly((Vector2){(float)cx,(float)cy}, (int)sides, (float)radius, (float)rot, CHASM_TO_RL_COLOR(c)); }
+
+/* ---- Texture extended ------------------------------------------------------ */
+static inline void rl_draw_texture_tiled(int64_t h, double sx, double sy, double sw, double sh,
+                                          double dx, double dy, double dw, double dh, int64_t tint) {
+    if (h <= 0 || h >= CHASM_RL_MAX_HANDLES) return;
+    DrawTexturePro(chasm_rl_handles[h].data.texture,
+        (Rectangle){(float)sx,(float)sy,(float)sw,(float)sh},
+        (Rectangle){(float)dx,(float)dy,(float)dw,(float)dh},
+        (Vector2){0,0}, 0.0f, CHASM_TO_RL_COLOR(tint));
+}
+static inline void rl_set_texture_filter(int64_t h, int64_t filter) {
+    if (h <= 0 || h >= CHASM_RL_MAX_HANDLES) return;
+    SetTextureFilter(chasm_rl_handles[h].data.texture, (int)filter);
+}
+
+/* ---- Camera 2D ------------------------------------------------------------- */
+static inline void rl_camera2d_begin(double cx, double cy, double tx, double ty, double rot, double zoom) {
+    Camera2D cam = {{(float)cx,(float)cy},{(float)tx,(float)ty},(float)rot,(float)zoom};
+    BeginMode2D(cam);
+}
+static inline void   rl_camera2d_end(void) { EndMode2D(); }
+static inline double rl_world_to_screen_x(double wx, double wy, double cx, double cy, double tx, double ty, double rot, double zoom) {
+    Camera2D cam = {{(float)cx,(float)cy},{(float)tx,(float)ty},(float)rot,(float)zoom};
+    return (double)GetWorldToScreen2D((Vector2){(float)wx,(float)wy}, cam).x;
+}
+static inline double rl_world_to_screen_y(double wx, double wy, double cx, double cy, double tx, double ty, double rot, double zoom) {
+    Camera2D cam = {{(float)cx,(float)cy},{(float)tx,(float)ty},(float)rot,(float)zoom};
+    return (double)GetWorldToScreen2D((Vector2){(float)wx,(float)wy}, cam).y;
+}
+
+/* ---- Gamepad --------------------------------------------------------------- */
+static inline bool   rl_gamepad_available(int64_t pad)               { return IsGamepadAvailable((int)pad); }
+static inline bool   rl_gamepad_button_down(int64_t pad, int64_t btn){ return IsGamepadButtonDown((int)pad, (int)btn); }
+static inline bool   rl_gamepad_button_pressed(int64_t pad, int64_t btn){ return IsGamepadButtonPressed((int)pad, (int)btn); }
+static inline double rl_gamepad_axis(int64_t pad, int64_t axis)      { return (double)GetGamepadAxisMovement((int)pad, (int)axis); }
+
+/* ---- Mouse extended -------------------------------------------------------- */
+static inline void rl_set_mouse_pos(double x, double y)  { SetMousePosition((int)x, (int)y); }
+static inline void rl_mouse_cursor(int64_t cursor)       { SetMouseCursor((int)cursor); }
+
+/* ---- Clipboard ------------------------------------------------------------- */
+static inline const char *rl_get_clipboard(void) {
+    const char *s = GetClipboardText();
+    return s ? s : "";
+}
+static inline void rl_set_clipboard(const char *text) { SetClipboardText(text); }
+
 /* ---- Collision ------------------------------------------------------------- */
 static inline bool rl_check_collision_recs(double x1, double y1, double w1, double h1,
                                             double x2, double y2, double w2, double h2) {

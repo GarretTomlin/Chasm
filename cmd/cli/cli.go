@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -58,7 +59,10 @@ func runCompile(args []string) {
 	if path == "" {
 		fatalf("usage: chasm compile <file.chasm> [--engine raylib] [--target wasm]\n")
 	}
-	outC := compileChasm(path, opts)
+	outC, err := compileChasm(path, opts)
+	if err != nil {
+		fatalf("compile: %v\n", err)
+	}
 	ext := ".c"
 	if opts.targetWasm {
 		ext = ".wat"
@@ -81,15 +85,110 @@ func runRun(args []string) {
 	buildAndRun(path, opts, false, nil)
 }
 
-// runningProc holds the currently running game process for watch mode
-var runningProc *exec.Cmd
-
 func runWatch(args []string) {
 	if len(args) == 0 {
 		fatalf("usage: chasm watch <file.chasm> [--engine raylib]\n")
 	}
 	path, opts := parseArgs(args)
+
+	// Non-raylib watch: legacy kill-and-restart behaviour.
+	if !opts.engineRaylib {
+		runWatchLegacy(path, opts)
+		return
+	}
+
+	// Raylib watch: hot-reload via sentinel file.
+	fmt.Printf("[watch] %s (hot-reload mode)\n", path)
+
+	// Initial compile to shared library.
+	initialDylib, err := compileSharedLib(path, opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[watch] initial compile failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[watch] waiting for a fix before starting engine...\n")
+		for {
+			time.Sleep(300 * time.Millisecond)
+			if _, statErr := os.Stat(path); statErr != nil {
+				continue
+			}
+			if initialDylib, err = compileSharedLib(path, opts); err == nil {
+				break
+			}
+		}
+	}
+
+	// Build engine binary (once).
+	engineBin, err := buildEngineOnly()
+	if err != nil {
+		fatalf("build engine: %v\n", err)
+	}
+
+	// Start engine, passing the initial dylib path as argv[1].
+	engineProc := exec.Command(engineBin, initialDylib)
+	engineProc.Stdout = os.Stdout
+	engineProc.Stderr = os.Stderr
+	if err := engineProc.Start(); err != nil {
+		fatalf("start engine: %v\n", err)
+	}
+	fmt.Printf("[watch] engine started (pid %d)\n", engineProc.Process.Pid)
+
+	// Monitor engine exit in background.
+	engineDone := make(chan error, 1)
+	go func() { engineDone <- engineProc.Wait() }()
+
+	// Handle SIGINT/SIGTERM: forward to engine and exit.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	go func() {
+		<-sigCh
+		if engineProc.Process != nil {
+			_ = engineProc.Process.Signal(os.Interrupt)
+		}
+		os.Exit(0)
+	}()
+
+	var lastMod time.Time
+	for {
+		select {
+		case exitErr := <-engineDone:
+			if exitErr != nil {
+				fmt.Fprintf(os.Stderr, "[watch] engine exited: %v\n", exitErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "[watch] engine exited cleanly\n")
+			}
+			return
+		default:
+		}
+
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+
+		if info.ModTime().After(lastMod) {
+			if !lastMod.IsZero() {
+				ts := time.Now().Format("15:04:05")
+				fmt.Printf("[%s] %s changed — recompiling...\n", ts, path)
+				if newDylib, compErr := compileSharedLib(path, opts); compErr != nil {
+					fmt.Fprintf(os.Stderr, "[%s] compile error: %v\n", ts, compErr)
+				} else {
+					fmt.Printf("[%s] compiled OK — signalling engine\n", ts)
+					if sentErr := writeReloadSentinel(newDylib); sentErr != nil {
+						fmt.Fprintf(os.Stderr, "[%s] sentinel write failed: %v\n", ts, sentErr)
+					}
+				}
+			}
+			lastMod = info.ModTime()
+		}
+
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
+// runWatchLegacy is the original kill-and-restart watch for non-raylib targets.
+func runWatchLegacy(path string, opts options) {
 	fmt.Printf("[watch] %s\n", path)
+	var runningProc *exec.Cmd
 	var lastMod time.Time
 	for {
 		info, err := os.Stat(path)
@@ -99,7 +198,6 @@ func runWatch(args []string) {
 			continue
 		}
 		if info.ModTime().After(lastMod) {
-			// Kill previous process if running
 			if runningProc != nil && runningProc.Process != nil {
 				_ = runningProc.Process.Kill()
 				_ = runningProc.Wait()
@@ -120,8 +218,10 @@ func runWatch(args []string) {
 // ---------------------------------------------------------------------------
 
 // compileChasm runs the bootstrap binary on path and returns the path to the
-// generated /tmp/chasm_out.c.
-func compileChasm(path string, opts options) string {
+// generated /tmp/chasm_out.c. Calls fatalf on unrecoverable errors (missing
+// bootstrap binary, missing source file). Returns an error if the bootstrap
+// compiler itself fails (e.g. syntax error in source) so callers can handle it.
+func compileChasm(path string, opts options) (string, error) {
 	home := chasmHome()
 	visited := map[string]bool{}
 
@@ -165,7 +265,7 @@ func compileChasm(path string, opts options) string {
 	cmd.Stdout = outFile
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fatalf("bootstrap compiler failed: %v\n", err)
+		return "", fmt.Errorf("bootstrap compiler: %w", err)
 	}
 
 	// Always write the runtime header from the repo (keeps it up to date).
@@ -174,24 +274,60 @@ func compileChasm(path string, opts options) string {
 		fmt.Fprintf(os.Stderr, "warning: could not copy chasm_rt.h: %v\n", err)
 	}
 
-	return "/tmp/chasm_out.c"
+	return "/tmp/chasm_out.c", nil
 }
 
 // buildAndRun compiles and executes the result.
 // If quiet is true, build errors still print but run errors are suppressed.
 // If procOut is non-nil, the process is started in background and stored there.
 func buildAndRun(path string, opts options, quiet bool, procOut **exec.Cmd) {
-	outC := compileChasm(path, opts)
+	// Raylib mode: compile to dylib + run via engine binary (same as watch).
+	if opts.engineRaylib {
+		dylibPath, err := compileSharedLib(path, opts)
+		if err != nil {
+			if !quiet {
+				fatalf("compile: %v\n", err)
+			}
+			fmt.Fprintf(os.Stderr, "[watch] compile error: %v\n", err)
+			return
+		}
+		engineBin, err := buildEngineOnly()
+		if err != nil {
+			if !quiet {
+				fatalf("build engine: %v\n", err)
+			}
+			return
+		}
+		run := exec.Command(engineBin, dylibPath)
+		run.Stdin = os.Stdin
+		run.Stdout = os.Stdout
+		run.Stderr = os.Stderr
+		if procOut != nil {
+			if err := run.Start(); err != nil && !quiet {
+				fmt.Fprintf(os.Stderr, "run: %v\n", err)
+			}
+			*procOut = run
+			return
+		}
+		if err := run.Run(); err != nil && !quiet {
+			fmt.Fprintf(os.Stderr, "run: %v\n", err)
+		}
+		return
+	}
+
+	// Standalone (non-raylib) mode.
+	outC, err := compileChasm(path, opts)
+	if err != nil {
+		if !quiet {
+			fatalf("compile: %v\n", err)
+		}
+		fmt.Fprintf(os.Stderr, "[watch] compile error: %v\n", err)
+		return
+	}
 
 	binPath := "/tmp/chasm_run_out"
-
-	var ccArgs []string
-	if opts.engineRaylib {
-		ccArgs = buildEngineCC(outC, binPath)
-	} else {
-		harnessC := writeStandaloneHarness()
-		ccArgs = []string{"cc", "-o", binPath, outC, harnessC, "-I/tmp"}
-	}
+	harnessC := writeStandaloneHarness()
+	ccArgs := []string{"cc", "-o", binPath, outC, harnessC, "-I/tmp"}
 
 	cc := exec.Command(ccArgs[0], ccArgs[1:]...)
 	cc.Stdout = os.Stdout
@@ -207,8 +343,6 @@ func buildAndRun(path string, opts options, quiet bool, procOut **exec.Cmd) {
 	run.Stdin = os.Stdin
 	run.Stdout = os.Stdout
 	run.Stderr = os.Stderr
-
-	// If procOut is provided, start in background for watch mode
 	if procOut != nil {
 		if err := run.Start(); err != nil && !quiet {
 			fmt.Fprintf(os.Stderr, "run: %v\n", err)
@@ -216,16 +350,122 @@ func buildAndRun(path string, opts options, quiet bool, procOut **exec.Cmd) {
 		*procOut = run
 		return
 	}
-
-	// Otherwise run synchronously
 	if err := run.Run(); err != nil && !quiet {
 		fmt.Fprintf(os.Stderr, "run: %v\n", err)
 	}
 }
 
-// buildEngineCC returns the cc argument list for linking with the Raylib engine.
+// compileSharedLib compiles the Chasm script to a uniquely-named shared library
+// (.dylib / .so) to avoid macOS dylib caching. Returns the output path on success.
+func compileSharedLib(path string, opts options) (string, error) {
+	outC, err := compileChasm(path, opts)
+	if err != nil {
+		return "", err
+	}
+
+	eng := raylibEngineDir()
+	rl := raylibDir()
+
+	// Remove /tmp/chasm_rt.h so the generated code's #include "chasm_rt.h"
+	// falls through to -I engine/ and finds the engine's copy.
+	_ = os.Remove("/tmp/chasm_rt.h")
+
+	var ext string
+	var sharedArgs []string
+	if runtime.GOOS == "darwin" {
+		ext = ".dylib"
+		sharedArgs = []string{"-dynamiclib", "-undefined", "dynamic_lookup"}
+	} else {
+		ext = ".so"
+		sharedArgs = []string{"-shared", "-fPIC"}
+	}
+
+	// Unique path per compile — avoids macOS dylib caching in dlopen.
+	scriptPath := fmt.Sprintf("/tmp/chasm_script_%d%s", time.Now().UnixNano(), ext)
+
+	args := []string{"cc"}
+	args = append(args, sharedArgs...)
+	args = append(args,
+		"-o", scriptPath,
+		outC,
+		"-I"+eng,
+		"-I"+filepath.Join(rl, "include"),
+	)
+
+	cc := exec.Command(args[0], args[1:]...)
+	cc.Stdout = os.Stdout
+	cc.Stderr = os.Stderr
+	if err := cc.Run(); err != nil {
+		return "", err
+	}
+	return scriptPath, nil
+}
+
+// buildEngineOnly compiles engine/main.c (with loader.h) to a standalone binary.
+// The binary is cached next to the engine sources as engine/.chasm_engine_cache
+// so it survives reboots. Skips rebuild if the binary is newer than all engine
+// source files. The script is NOT linked in — loaded via dlopen.
+func buildEngineOnly() (string, error) {
+	eng := raylibEngineDir()
+	rl := raylibDir()
+	mainC := filepath.Join(eng, "main.c")
+	exportsC := filepath.Join(eng, "chasm_rl_exports.c")
+	loaderH := filepath.Join(eng, "loader.h")
+	binPath := filepath.Join(eng, ".chasm_engine_cache")
+
+	// Cache check: skip rebuild if binary is newer than all source files.
+	if binInfo, err := os.Stat(binPath); err == nil {
+		binMod := binInfo.ModTime()
+		stale := false
+		for _, src := range []string{mainC, exportsC, loaderH} {
+			if info, err := os.Stat(src); err == nil && info.ModTime().After(binMod) {
+				stale = true
+				break
+			}
+		}
+		if !stale {
+			return binPath, nil
+		}
+	}
+
+	fmt.Println("[watch] building engine binary...")
+	args := []string{
+		"cc", "-O0", "-o", binPath,
+		mainC, exportsC,
+		"-I" + eng,
+		"-I" + filepath.Join(rl, "include"),
+		filepath.Join(rl, "lib", "libraylib.a"),
+	}
+	if runtime.GOOS == "darwin" {
+		args = append(args,
+			"-framework", "OpenGL",
+			"-framework", "Cocoa",
+			"-framework", "IOKit",
+			"-framework", "CoreVideo",
+			"-framework", "CoreAudio",
+			"-framework", "AudioToolbox",
+		)
+	} else {
+		args = append(args, "-lGL", "-lm", "-lpthread", "-ldl", "-lrt", "-lX11")
+	}
+
+	cc := exec.Command(args[0], args[1:]...)
+	cc.Stdout = os.Stdout
+	cc.Stderr = os.Stderr
+	if err := cc.Run(); err != nil {
+		return "", err
+	}
+	return binPath, nil
+}
+
+// writeReloadSentinel writes the dylib path into the sentinel file.
+// The engine reads the path from the file, then unlinks it.
+func writeReloadSentinel(dylibPath string) error {
+	return os.WriteFile("/tmp/chasm_reload_ready", []byte(dylibPath), 0644)
+}
+
 func buildEngineCC(scriptC, binPath string) []string {
-	eng := engineDir()
+	eng := raylibEngineDir()
 	rl := raylibDir()
 	mainC := filepath.Join(eng, "main.c")
 	shimH := filepath.Join(eng, "chasm_rl_shim.h")
@@ -412,8 +652,12 @@ func engineDir() string {
 	return filepath.Join(chasmHome(), "engine")
 }
 
+func raylibEngineDir() string {
+	return filepath.Join(engineDir(), "raylib")
+}
+
 func raylibDir() string {
-	base := engineDir()
+	base := raylibEngineDir()
 	// Normalise GOOS to match directory naming (darwin → macos).
 	osName := runtime.GOOS
 	if osName == "darwin" {
@@ -428,7 +672,7 @@ func raylibDir() string {
 }
 
 func raylibChasmPath() string {
-	return filepath.Join(engineDir(), "raylib.chasm")
+	return filepath.Join(raylibEngineDir(), "raylib.chasm")
 }
 
 // ---------------------------------------------------------------------------

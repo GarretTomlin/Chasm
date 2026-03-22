@@ -75,6 +75,58 @@ extern fn mouse_wheel() -> float                                         = "rl_m
 extern fn hide_cursor() -> void                                          = "rl_hide_cursor"
 extern fn show_cursor() -> void                                          = "rl_show_cursor"
 
+# ---- Audio extended --------------------------------------------------------
+extern fn sound_playing(handle: int) -> bool                             = "rl_sound_playing"
+extern fn sound_volume(handle: int, vol: float) -> void                  = "rl_sound_volume"
+extern fn sound_pitch(handle: int, pitch: float) -> void                 = "rl_sound_pitch"
+extern fn pause_sound(handle: int) -> void                               = "rl_pause_sound"
+extern fn resume_sound(handle: int) -> void                              = "rl_resume_sound"
+extern fn music_playing(handle: int) -> bool                             = "rl_music_playing"
+extern fn music_volume(handle: int, vol: float) -> void                  = "rl_music_volume"
+extern fn music_pitch(handle: int, pitch: float) -> void                 = "rl_music_pitch"
+extern fn music_length(handle: int) -> float                             = "rl_music_length"
+extern fn music_played(handle: int) -> float                             = "rl_music_played"
+extern fn pause_music(handle: int) -> void                               = "rl_pause_music"
+extern fn resume_music(handle: int) -> void                              = "rl_resume_music"
+
+# ---- Window extended -------------------------------------------------------
+extern fn window_resized() -> bool                                       = "rl_window_resized"
+extern fn set_window_size(w: int, h: int) -> void                        = "rl_set_window_size"
+extern fn toggle_fullscreen() -> void                                    = "rl_toggle_fullscreen"
+extern fn is_fullscreen() -> bool                                        = "rl_is_fullscreen"
+extern fn window_focused() -> bool                                       = "rl_window_focused"
+
+# ---- Drawing extended ------------------------------------------------------
+extern fn draw_triangle(x1: float, y1: float, x2: float, y2: float, x3: float, y3: float, color: int) -> void = "rl_draw_triangle"
+extern fn draw_triangle_lines(x1: float, y1: float, x2: float, y2: float, x3: float, y3: float, color: int) -> void = "rl_draw_triangle_lines"
+extern fn draw_ellipse(cx: float, cy: float, rx: float, ry: float, color: int) -> void = "rl_draw_ellipse"
+extern fn draw_ring(cx: float, cy: float, inner: float, outer: float, start: float, end: float, segs: int, color: int) -> void = "rl_draw_ring"
+extern fn draw_poly(cx: float, cy: float, sides: int, radius: float, rot: float, color: int) -> void = "rl_draw_poly"
+
+# ---- Texture extended ------------------------------------------------------
+extern fn draw_texture_tiled(handle: int, sx: float, sy: float, sw: float, sh: float, dx: float, dy: float, dw: float, dh: float, tint: int) -> void = "rl_draw_texture_tiled"
+extern fn set_texture_filter(handle: int, filter: int) -> void           = "rl_set_texture_filter"
+
+# ---- Camera 2D -------------------------------------------------------------
+extern fn camera2d_begin(cx: float, cy: float, tx: float, ty: float, rot: float, zoom: float) -> void = "rl_camera2d_begin"
+extern fn camera2d_end() -> void                                         = "rl_camera2d_end"
+extern fn world_to_screen_x(wx: float, wy: float, cx: float, cy: float, tx: float, ty: float, rot: float, zoom: float) -> float = "rl_world_to_screen_x"
+extern fn world_to_screen_y(wx: float, wy: float, cx: float, cy: float, tx: float, ty: float, rot: float, zoom: float) -> float = "rl_world_to_screen_y"
+
+# ---- Gamepad ---------------------------------------------------------------
+extern fn gamepad_available(pad: int) -> bool                            = "rl_gamepad_available"
+extern fn gamepad_button_down(pad: int, btn: int) -> bool                = "rl_gamepad_button_down"
+extern fn gamepad_button_pressed(pad: int, btn: int) -> bool             = "rl_gamepad_button_pressed"
+extern fn gamepad_axis(pad: int, axis: int) -> float                     = "rl_gamepad_axis"
+
+# ---- Mouse extended --------------------------------------------------------
+extern fn set_mouse_pos(x: float, y: float) -> void                      = "rl_set_mouse_pos"
+extern fn mouse_cursor(cursor: int) -> void                              = "rl_mouse_cursor"
+
+# ---- Clipboard -------------------------------------------------------------
+extern fn get_clipboard() -> str                                         = "rl_get_clipboard"
+extern fn set_clipboard(text: str) -> void                               = "rl_set_clipboard"
+
 # ---- Collision -------------------------------------------------------------
 extern fn collide_rects(x1: float, y1: float, w1: float, h1: float, x2: float, y2: float, w2: float, h2: float) -> bool = "rl_check_collision_recs"
 extern fn collide_circles(x1: float, y1: float, r1: float, x2: float, y2: float, r2: float) -> bool = "rl_check_collision_circles"

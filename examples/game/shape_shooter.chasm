@@ -1,0 +1,578 @@
+# shape_shooter.chasm — Shape Shooter: exercises new raylib-extended-bindings
+# Run: chasm run --engine raylib examples/shape_shooter/shape_shooter.chasm
+#
+# Controls:
+#   WASD / Arrow keys  — move player
+#   SPACE              — shoot
+#   Gamepad left stick — move (if connected)
+#   Gamepad A (btn 0)  — shoot
+#
+# New bindings exercised:
+#   draw_triangle, draw_poly, draw_ring, draw_ellipse
+#   camera2d_begin, camera2d_end, world_to_screen_x, world_to_screen_y
+#   gamepad_available, gamepad_axis, gamepad_button_pressed
+#   window_focused, window_resized
+
+# ---- World constants --------------------------------------------------------
+@W :: script = 800.0
+@H :: script = 600.0
+
+# ---- Player state -----------------------------------------------------------
+@px     :: script = 400.0   # position
+@py     :: script = 300.0
+@pangle :: script = 0.0     # facing angle (degrees)
+@pspeed :: script = 180.0
+
+# ---- Camera -----------------------------------------------------------------
+@cam_x  :: script = 400.0   # camera offset (screen center)
+@cam_y  :: script = 300.0
+
+# ---- Bullets (4 slots, each independently active) ---------------------------
+# active flag: 0 = free, 1 = in flight
+@bx0    :: script = 0.0
+@by0    :: script = 0.0
+@bvx0   :: script = 0.0
+@bvy0   :: script = 0.0
+@ba0    :: script = 0      # active
+
+@bx1    :: script = 0.0
+@by1    :: script = 0.0
+@bvx1   :: script = 0.0
+@bvy1   :: script = 0.0
+@ba1    :: script = 0
+
+@bx2    :: script = 0.0
+@by2    :: script = 0.0
+@bvx2   :: script = 0.0
+@bvy2   :: script = 0.0
+@ba2    :: script = 0
+
+@bx3    :: script = 0.0
+@by3    :: script = 0.0
+@bvx3   :: script = 0.0
+@bvy3   :: script = 0.0
+@ba3    :: script = 0
+
+# ---- Enemies (up to 8) ------------------------------------------------------
+@ex0 :: script = 100.0
+@ey0 :: script = 100.0
+@ex1 :: script = 700.0
+@ey1 :: script = 100.0
+@ex2 :: script = 100.0
+@ey2 :: script = 500.0
+@ex3 :: script = 700.0
+@ey3 :: script = 500.0
+@ex4 :: script = 400.0
+@ey4 :: script = 80.0
+@ex5 :: script = 400.0
+@ey5 :: script = 520.0
+@ex6 :: script = 80.0
+@ey6 :: script = 300.0
+@ex7 :: script = 720.0
+@ey7 :: script = 300.0
+@enemy_alive0 :: script = 1
+@enemy_alive1 :: script = 1
+@enemy_alive2 :: script = 1
+@enemy_alive3 :: script = 1
+@enemy_alive4 :: script = 1
+@enemy_alive5 :: script = 1
+@enemy_alive6 :: script = 1
+@enemy_alive7 :: script = 1
+
+# ---- Score / game state -----------------------------------------------------
+@score      :: script     = 0
+@high_score :: persistent = 0
+@shoot_cd   :: script     = 0.0   # shoot cooldown
+@game_over  :: script     = 0
+@win        :: script     = 0
+@time_alive :: script     = 0.0
+
+# ---- Helpers ----------------------------------------------------------------
+
+defp angle_to_dx(a :: float) :: float do
+  return cos(deg_to_rad(a))
+end
+
+defp angle_to_dy(a :: float) :: float do
+  return sin(deg_to_rad(a))
+end
+
+defp dist(ax :: float, ay :: float, bx :: float, by :: float) :: float do
+  dx :: frame = ax - bx
+  dy :: frame = ay - by
+  return sqrt(dx * dx + dy * dy)
+end
+
+defp enemies_left() :: int do
+  total :: frame = @enemy_alive0 + @enemy_alive1 + @enemy_alive2 + @enemy_alive3
+  total = total + @enemy_alive4 + @enemy_alive5 + @enemy_alive6 + @enemy_alive7
+  return total
+end
+
+# ---- Bullet helpers ---------------------------------------------------------
+
+defp spawn_bullet(angle :: float) do
+  spd :: frame = 420.0
+  dx  :: frame = angle_to_dx(angle)
+  dy  :: frame = angle_to_dy(angle)
+  if @ba0 == 0 do
+    @bx0 = @px
+    @by0 = @py
+    @bvx0 = dx * spd
+    @bvy0 = dy * spd
+    @ba0 = 1
+    return
+  end
+  if @ba1 == 0 do
+    @bx1 = @px
+    @by1 = @py
+    @bvx1 = dx * spd
+    @bvy1 = dy * spd
+    @ba1 = 1
+    return
+  end
+  if @ba2 == 0 do
+    @bx2 = @px
+    @by2 = @py
+    @bvx2 = dx * spd
+    @bvy2 = dy * spd
+    @ba2 = 1
+    return
+  end
+  if @ba3 == 0 do
+    @bx3 = @px
+    @by3 = @py
+    @bvx3 = dx * spd
+    @bvy3 = dy * spd
+    @ba3 = 1
+  end
+end
+
+defp move_bullets(dt :: float) do
+  if @ba0 == 1 do
+    @bx0 = @bx0 + @bvx0 * dt
+    @by0 = @by0 + @bvy0 * dt
+    if @bx0 < 0.0 or @bx0 > @W or @by0 < 0.0 or @by0 > @H do
+      @ba0 = 0
+    end
+  end
+  if @ba1 == 1 do
+    @bx1 = @bx1 + @bvx1 * dt
+    @by1 = @by1 + @bvy1 * dt
+    if @bx1 < 0.0 or @bx1 > @W or @by1 < 0.0 or @by1 > @H do
+      @ba1 = 0
+    end
+  end
+  if @ba2 == 1 do
+    @bx2 = @bx2 + @bvx2 * dt
+    @by2 = @by2 + @bvy2 * dt
+    if @bx2 < 0.0 or @bx2 > @W or @by2 < 0.0 or @by2 > @H do
+      @ba2 = 0
+    end
+  end
+  if @ba3 == 1 do
+    @bx3 = @bx3 + @bvx3 * dt
+    @by3 = @by3 + @bvy3 * dt
+    if @bx3 < 0.0 or @bx3 > @W or @by3 < 0.0 or @by3 > @H do
+      @ba3 = 0
+    end
+  end
+end
+
+# Check if bullet (bx,by) hits enemy (ex,ey); kill enemy if so, return new alive
+defp check_hit(bx :: float, by :: float, ex :: float, ey :: float, alive :: int) :: int do
+  if alive == 0 do
+    return 0
+  end
+  if dist(bx, by, ex, ey) < 22.0 do
+    @score = @score + 100
+    return 0
+  end
+  return alive
+end
+
+# ---- Enemy movement ---------------------------------------------------------
+
+defp move_enemy(ex :: float, ey :: float) :: float do
+  dx :: frame = @px - ex
+  dy :: frame = @py - ey
+  d  :: frame = sqrt(dx * dx + dy * dy)
+  if d < 1.0 do
+    return ex
+  end
+  return ex + (dx / d) * 60.0 * 0.016
+end
+
+defp move_enemy_y(ex :: float, ey :: float) :: float do
+  dx :: frame = @px - ex
+  dy :: frame = @py - ey
+  d  :: frame = sqrt(dx * dx + dy * dy)
+  if d < 1.0 do
+    return ey
+  end
+  return ey + (dy / d) * 60.0 * 0.016
+end
+
+# ---- on_tick ----------------------------------------------------------------
+
+def on_tick(dt :: float) do
+  if @game_over == 1 or @win == 1 do
+    if key_pressed(257) do   # ENTER — restart
+      @px = 400.0
+      @py = 300.0
+      @pangle = 0.0
+      @score = 0
+      @game_over = 0
+      @win = 0
+      @time_alive = 0.0
+      @shoot_cd = 0.0
+      @ba0 = 0
+      @ba1 = 0
+      @ba2 = 0
+      @ba3 = 0
+      @enemy_alive0 = 1
+      @enemy_alive1 = 1
+      @enemy_alive2 = 1
+      @enemy_alive3 = 1
+      @enemy_alive4 = 1
+      @enemy_alive5 = 1
+      @enemy_alive6 = 1
+      @enemy_alive7 = 1
+      @ex0 = 100.0
+      @ey0 = 100.0
+      @ex1 = 700.0
+      @ey1 = 100.0
+      @ex2 = 100.0
+      @ey2 = 500.0
+      @ex3 = 700.0
+      @ey3 = 500.0
+      @ex4 = 400.0
+      @ey4 = 80.0
+      @ex5 = 400.0
+      @ey5 = 520.0
+      @ex6 = 80.0
+      @ey6 = 300.0
+      @ex7 = 720.0
+      @ey7 = 300.0
+    end
+    return
+  end
+
+  @time_alive = @time_alive + dt
+
+  # ---- Player movement -------------------------------------------------------
+  move_x :: frame = 0.0
+  move_y :: frame = 0.0
+
+  if key_down(65) or key_down(263) do   # A / LEFT
+    move_x = move_x - 1.0
+  end
+  if key_down(68) or key_down(262) do   # D / RIGHT
+    move_x = move_x + 1.0
+  end
+  if key_down(87) or key_down(265) do   # W / UP
+    move_y = move_y - 1.0
+  end
+  if key_down(83) or key_down(264) do   # S / DOWN
+    move_y = move_y + 1.0
+  end
+
+  # Gamepad support
+  if gamepad_available(0) do
+    gx :: frame = gamepad_axis(0, 0)
+    gy :: frame = gamepad_axis(0, 1)
+    if gx > 0.15 or gx < 0.0 - 0.15 do
+      move_x = move_x + gx
+    end
+    if gy > 0.15 or gy < 0.0 - 0.15 do
+      move_y = move_y + gy
+    end
+  end
+
+  # Normalize diagonal movement
+  if move_x != 0.0 and move_y != 0.0 do
+    move_x = move_x * 0.7071
+    move_y = move_y * 0.7071
+  end
+
+  @px = @px + move_x * @pspeed * dt
+  @py = @py + move_y * @pspeed * dt
+
+  # Clamp to world bounds
+  @px = clamp(@px, 16.0, @W - 16.0)
+  @py = clamp(@py, 16.0, @H - 16.0)
+
+  # Update facing angle from movement
+  if move_x != 0.0 or move_y != 0.0 do
+    @pangle = rad_to_deg(atan2(move_y, move_x))
+  end
+
+  # ---- Shooting --------------------------------------------------------------
+  @shoot_cd = @shoot_cd - dt
+  can_shoot :: frame = 0
+  if key_pressed(32) do
+    can_shoot = 1
+  end
+  if gamepad_available(0) do
+    if gamepad_button_pressed(0, 0) do
+      can_shoot = 1
+    end
+  end
+  if can_shoot == 1 and @shoot_cd <= 0.0 do
+    spawn_bullet(@pangle)
+    @shoot_cd = 0.25
+  end
+
+  # ---- Move bullets ----------------------------------------------------------
+  move_bullets(dt)
+
+  # ---- Move enemies ----------------------------------------------------------
+  if @enemy_alive0 == 1 do
+    @ex0 = move_enemy(@ex0, @ey0)
+    @ey0 = move_enemy_y(@ex0, @ey0)
+  end
+  if @enemy_alive1 == 1 do
+    @ex1 = move_enemy(@ex1, @ey1)
+    @ey1 = move_enemy_y(@ex1, @ey1)
+  end
+  if @enemy_alive2 == 1 do
+    @ex2 = move_enemy(@ex2, @ey2)
+    @ey2 = move_enemy_y(@ex2, @ey2)
+  end
+  if @enemy_alive3 == 1 do
+    @ex3 = move_enemy(@ex3, @ey3)
+    @ey3 = move_enemy_y(@ex3, @ey3)
+  end
+  if @enemy_alive4 == 1 do
+    @ex4 = move_enemy(@ex4, @ey4)
+    @ey4 = move_enemy_y(@ex4, @ey4)
+  end
+  if @enemy_alive5 == 1 do
+    @ex5 = move_enemy(@ex5, @ey5)
+    @ey5 = move_enemy_y(@ex5, @ey5)
+  end
+  if @enemy_alive6 == 1 do
+    @ex6 = move_enemy(@ex6, @ey6)
+    @ey6 = move_enemy_y(@ex6, @ey6)
+  end
+  if @enemy_alive7 == 1 do
+    @ex7 = move_enemy(@ex7, @ey7)
+    @ey7 = move_enemy_y(@ex7, @ey7)
+  end
+
+  # ---- Bullet vs enemy collisions --------------------------------------------
+  if @ba0 == 1 do
+    @enemy_alive0 = check_hit(@bx0, @by0, @ex0, @ey0, @enemy_alive0)
+    @enemy_alive1 = check_hit(@bx0, @by0, @ex1, @ey1, @enemy_alive1)
+    @enemy_alive2 = check_hit(@bx0, @by0, @ex2, @ey2, @enemy_alive2)
+    @enemy_alive3 = check_hit(@bx0, @by0, @ex3, @ey3, @enemy_alive3)
+    @enemy_alive4 = check_hit(@bx0, @by0, @ex4, @ey4, @enemy_alive4)
+    @enemy_alive5 = check_hit(@bx0, @by0, @ex5, @ey5, @enemy_alive5)
+    @enemy_alive6 = check_hit(@bx0, @by0, @ex6, @ey6, @enemy_alive6)
+    @enemy_alive7 = check_hit(@bx0, @by0, @ex7, @ey7, @enemy_alive7)
+  end
+  if @ba1 == 1 do
+    @enemy_alive0 = check_hit(@bx1, @by1, @ex0, @ey0, @enemy_alive0)
+    @enemy_alive1 = check_hit(@bx1, @by1, @ex1, @ey1, @enemy_alive1)
+    @enemy_alive2 = check_hit(@bx1, @by1, @ex2, @ey2, @enemy_alive2)
+    @enemy_alive3 = check_hit(@bx1, @by1, @ex3, @ey3, @enemy_alive3)
+    @enemy_alive4 = check_hit(@bx1, @by1, @ex4, @ey4, @enemy_alive4)
+    @enemy_alive5 = check_hit(@bx1, @by1, @ex5, @ey5, @enemy_alive5)
+    @enemy_alive6 = check_hit(@bx1, @by1, @ex6, @ey6, @enemy_alive6)
+    @enemy_alive7 = check_hit(@bx1, @by1, @ex7, @ey7, @enemy_alive7)
+  end
+  if @ba2 == 1 do
+    @enemy_alive0 = check_hit(@bx2, @by2, @ex0, @ey0, @enemy_alive0)
+    @enemy_alive1 = check_hit(@bx2, @by2, @ex1, @ey1, @enemy_alive1)
+    @enemy_alive2 = check_hit(@bx2, @by2, @ex2, @ey2, @enemy_alive2)
+    @enemy_alive3 = check_hit(@bx2, @by2, @ex3, @ey3, @enemy_alive3)
+    @enemy_alive4 = check_hit(@bx2, @by2, @ex4, @ey4, @enemy_alive4)
+    @enemy_alive5 = check_hit(@bx2, @by2, @ex5, @ey5, @enemy_alive5)
+    @enemy_alive6 = check_hit(@bx2, @by2, @ex6, @ey6, @enemy_alive6)
+    @enemy_alive7 = check_hit(@bx2, @by2, @ex7, @ey7, @enemy_alive7)
+  end
+  if @ba3 == 1 do
+    @enemy_alive0 = check_hit(@bx3, @by3, @ex0, @ey0, @enemy_alive0)
+    @enemy_alive1 = check_hit(@bx3, @by3, @ex1, @ey1, @enemy_alive1)
+    @enemy_alive2 = check_hit(@bx3, @by3, @ex2, @ey2, @enemy_alive2)
+    @enemy_alive3 = check_hit(@bx3, @by3, @ex3, @ey3, @enemy_alive3)
+    @enemy_alive4 = check_hit(@bx3, @by3, @ex4, @ey4, @enemy_alive4)
+    @enemy_alive5 = check_hit(@bx3, @by3, @ex5, @ey5, @enemy_alive5)
+    @enemy_alive6 = check_hit(@bx3, @by3, @ex6, @ey6, @enemy_alive6)
+    @enemy_alive7 = check_hit(@bx3, @by3, @ex7, @ey7, @enemy_alive7)
+  end
+
+  # ---- Player vs enemy collisions (game over) --------------------------------
+  if @enemy_alive0 == 1 and dist(@px, @py, @ex0, @ey0) < 20.0 do
+    @game_over = 1
+  end
+  if @enemy_alive1 == 1 and dist(@px, @py, @ex1, @ey1) < 20.0 do
+    @game_over = 1
+  end
+  if @enemy_alive2 == 1 and dist(@px, @py, @ex2, @ey2) < 20.0 do
+    @game_over = 1
+  end
+  if @enemy_alive3 == 1 and dist(@px, @py, @ex3, @ey3) < 20.0 do
+    @game_over = 1
+  end
+  if @enemy_alive4 == 1 and dist(@px, @py, @ex4, @ey4) < 20.0 do
+    @game_over = 1
+  end
+  if @enemy_alive5 == 1 and dist(@px, @py, @ex5, @ey5) < 20.0 do
+    @game_over = 1
+  end
+  if @enemy_alive6 == 1 and dist(@px, @py, @ex6, @ey6) < 20.0 do
+    @game_over = 1
+  end
+  if @enemy_alive7 == 1 and dist(@px, @py, @ex7, @ey7) < 20.0 do
+    @game_over = 1
+  end
+
+  # ---- Win condition ---------------------------------------------------------
+  if enemies_left() == 0 do
+    @win = 1
+    if @score > @high_score do
+      @high_score = @score
+    end
+  end
+
+  # ---- Smooth camera follow --------------------------------------------------
+  @cam_x = @cam_x + (@px - @cam_x) * 5.0 * dt
+  @cam_y = @cam_y + (@py - @cam_y) * 5.0 * dt
+end
+
+# ---- Drawing helpers --------------------------------------------------------
+
+defp draw_player(x :: float, y :: float, angle :: float, focused :: bool) do
+  # Body: pentagon (5-sided polygon)
+  col :: frame = 0x44aaFFFF
+  if not focused do
+    col = 0x446688FF
+  end
+  draw_poly(x, y, 5, 14.0, angle, col)
+  draw_poly(x, y, 5, 14.0, angle, 0x88ccFFAA)
+
+  # Nose: triangle pointing in facing direction
+  dx :: frame = angle_to_dx(angle)
+  dy :: frame = angle_to_dy(angle)
+  nx :: frame = x + dx * 18.0
+  ny :: frame = y + dy * 18.0
+  lx :: frame = x + angle_to_dx(angle + 120.0) * 10.0
+  ly :: frame = y + angle_to_dy(angle + 120.0) * 10.0
+  rx :: frame = x + angle_to_dx(angle - 120.0) * 10.0
+  ry :: frame = y + angle_to_dy(angle - 120.0) * 10.0
+  draw_triangle(nx, ny, lx, ly, rx, ry, 0xFFFFFFFF)
+
+  # Engine glow ring
+  draw_ring(x, y, 15.0, 18.0, 0.0, 360.0, 16, 0x2244FFAA)
+end
+
+defp draw_enemy(x :: float, y :: float, t :: float) do
+  # Pulsing ring enemy
+  pulse :: frame = sin(t * 3.0) * 3.0
+  draw_ring(x, y, 10.0 + pulse, 18.0 + pulse, 0.0, 360.0, 12, 0xFF4422CC)
+  draw_ellipse(x, y, 10.0, 8.0, 0xFF6644FF)
+  draw_triangle_lines(x, y - 16.0, x - 14.0, y + 10.0, x + 14.0, y + 10.0, 0xFF2200FF)
+end
+
+defp draw_bullet(x :: float, y :: float) do
+  draw_ellipse(x, y, 5.0, 3.0, 0xFFFF44FF)
+  draw_circle(x, y, 3.0, 0xFFFFAAFF)
+end
+
+defp draw_arena() do
+  # Border
+  draw_rect_lines(0.0, 0.0, @W, @H, 0x334455FF)
+  # Grid lines (horizontal)
+  draw_line(0.0, 150.0, @W, 150.0, 0x1a2233FF)
+  draw_line(0.0, 300.0, @W, 300.0, 0x1a2233FF)
+  draw_line(0.0, 450.0, @W, 450.0, 0x1a2233FF)
+  # Grid lines (vertical)
+  draw_line(200.0, 0.0, 200.0, @H, 0x1a2233FF)
+  draw_line(400.0, 0.0, 400.0, @H, 0x1a2233FF)
+  draw_line(600.0, 0.0, 600.0, @H, 0x1a2233FF)
+end
+
+# ---- on_draw ----------------------------------------------------------------
+
+def on_draw() do
+  clear(0x0d1117FF)
+
+  focused :: frame = window_focused()
+
+  if @game_over == 1 do
+    draw_text("GAME OVER", 260.0, 240.0, 48, 0xFF4422FF)
+    draw_text("Press ENTER to restart", 240.0, 310.0, 20, 0x888888FF)
+    draw_text("Score: #{@score}", 330.0, 350.0, 20, 0xFFFFFFFF)
+    return
+  end
+
+  if @win == 1 do
+    draw_text("YOU WIN!", 290.0, 240.0, 48, 0x44FF88FF)
+    draw_text("Press ENTER to restart", 240.0, 310.0, 20, 0x888888FF)
+    draw_text("Score: #{@score}", 330.0, 350.0, 20, 0xFFFFFFFF)
+    return
+  end
+
+  # Camera 2D — follow player with slight offset
+  camera2d_begin(@cam_x, @cam_y, @px, @py, 0.0, 1.0)
+
+  draw_arena()
+
+  # Enemies
+  if @enemy_alive0 == 1 do
+    draw_enemy(@ex0, @ey0, @time_alive)
+  end
+  if @enemy_alive1 == 1 do
+    draw_enemy(@ex1, @ey1, @time_alive)
+  end
+  if @enemy_alive2 == 1 do
+    draw_enemy(@ex2, @ey2, @time_alive)
+  end
+  if @enemy_alive3 == 1 do
+    draw_enemy(@ex3, @ey3, @time_alive)
+  end
+  if @enemy_alive4 == 1 do
+    draw_enemy(@ex4, @ey4, @time_alive)
+  end
+  if @enemy_alive5 == 1 do
+    draw_enemy(@ex5, @ey5, @time_alive)
+  end
+  if @enemy_alive6 == 1 do
+    draw_enemy(@ex6, @ey6, @time_alive)
+  end
+  if @enemy_alive7 == 1 do
+    draw_enemy(@ex7, @ey7, @time_alive)
+  end
+
+  # Bullets
+  if @ba0 == 1 do
+    draw_bullet(@bx0, @by0)
+  end
+  if @ba1 == 1 do
+    draw_bullet(@bx1, @by1)
+  end
+  if @ba2 == 1 do
+    draw_bullet(@bx2, @by2)
+  end
+  if @ba3 == 1 do
+    draw_bullet(@bx3, @by3)
+  end
+
+  # Player
+  draw_player(@px, @py, @pangle, focused)
+
+  camera2d_end()
+
+  # HUD (drawn in screen space, outside camera)
+  draw_text("SHAPE SHOOTER", 12.0, 12.0, 22, 0x44AAFFFF)
+  draw_text("Score: #{@score}", 12.0, 40.0, 18, 0xFFFFFFFF)
+  draw_text("Best:  #{@high_score}", 12.0, 62.0, 16, 0xFFAA44FF)
+  draw_text("Enemies: #{enemies_left()}", 12.0, 84.0, 16, 0xFF6644FF)
+  draw_text("WASD/Arrows: move  SPACE: shoot", 12.0, 576.0, 14, 0x556677FF)
+  draw_fps(720.0, 12.0)
+
+  if not focused do
+    draw_text("[ paused - click to focus ]", 240.0, 290.0, 18, 0x888888AA)
+  end
+end

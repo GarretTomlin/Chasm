@@ -91,6 +91,69 @@ static inline double chasm_mouse_wheel(ChasmCtx *ctx)                  { (void)c
 static inline void   chasm_hide_cursor(ChasmCtx *ctx)                  { (void)ctx; rl_hide_cursor(); }
 static inline void   chasm_show_cursor(ChasmCtx *ctx)                  { (void)ctx; rl_show_cursor(); }
 
+/* ---- Audio extended -------------------------------------------------------- */
+static inline bool   chasm_sound_playing(ChasmCtx *ctx, int64_t h)              { (void)ctx; return rl_sound_playing(h); }
+static inline void   chasm_sound_volume(ChasmCtx *ctx, int64_t h, double vol)   { (void)ctx; rl_sound_volume(h, vol); }
+static inline void   chasm_sound_pitch(ChasmCtx *ctx, int64_t h, double pitch)  { (void)ctx; rl_sound_pitch(h, pitch); }
+static inline void   chasm_pause_sound(ChasmCtx *ctx, int64_t h)                { (void)ctx; rl_pause_sound(h); }
+static inline void   chasm_resume_sound(ChasmCtx *ctx, int64_t h)               { (void)ctx; rl_resume_sound(h); }
+static inline bool   chasm_music_playing(ChasmCtx *ctx, int64_t h)              { (void)ctx; return rl_music_playing(h); }
+static inline void   chasm_music_volume(ChasmCtx *ctx, int64_t h, double vol)   { (void)ctx; rl_music_volume(h, vol); }
+static inline void   chasm_music_pitch(ChasmCtx *ctx, int64_t h, double pitch)  { (void)ctx; rl_music_pitch(h, pitch); }
+static inline double chasm_music_length(ChasmCtx *ctx, int64_t h)               { (void)ctx; return rl_music_length(h); }
+static inline double chasm_music_played(ChasmCtx *ctx, int64_t h)               { (void)ctx; return rl_music_played(h); }
+static inline void   chasm_pause_music(ChasmCtx *ctx, int64_t h)                { (void)ctx; rl_pause_music(h); }
+static inline void   chasm_resume_music(ChasmCtx *ctx, int64_t h)               { (void)ctx; rl_resume_music(h); }
+
+/* ---- Window extended ------------------------------------------------------- */
+static inline bool  chasm_window_resized(ChasmCtx *ctx)                         { (void)ctx; return rl_window_resized(); }
+static inline void  chasm_set_window_size(ChasmCtx *ctx, int64_t w, int64_t h)  { (void)ctx; rl_set_window_size(w, h); }
+static inline void  chasm_toggle_fullscreen(ChasmCtx *ctx)                      { (void)ctx; rl_toggle_fullscreen(); }
+static inline bool  chasm_is_fullscreen(ChasmCtx *ctx)                          { (void)ctx; return rl_is_fullscreen(); }
+static inline bool  chasm_window_focused(ChasmCtx *ctx)                         { (void)ctx; return rl_window_focused(); }
+
+/* ---- Drawing extended ------------------------------------------------------ */
+static inline void chasm_draw_triangle(ChasmCtx *ctx, double x1, double y1, double x2, double y2, double x3, double y3, int64_t c)
+    { (void)ctx; rl_draw_triangle(x1, y1, x2, y2, x3, y3, c); }
+static inline void chasm_draw_triangle_lines(ChasmCtx *ctx, double x1, double y1, double x2, double y2, double x3, double y3, int64_t c)
+    { (void)ctx; rl_draw_triangle_lines(x1, y1, x2, y2, x3, y3, c); }
+static inline void chasm_draw_ellipse(ChasmCtx *ctx, double cx, double cy, double rx, double ry, int64_t c)
+    { (void)ctx; rl_draw_ellipse(cx, cy, rx, ry, c); }
+static inline void chasm_draw_ring(ChasmCtx *ctx, double cx, double cy, double inner, double outer, double start, double end, int64_t segs, int64_t c)
+    { (void)ctx; rl_draw_ring(cx, cy, inner, outer, start, end, segs, c); }
+static inline void chasm_draw_poly(ChasmCtx *ctx, double cx, double cy, int64_t sides, double radius, double rot, int64_t c)
+    { (void)ctx; rl_draw_poly(cx, cy, sides, radius, rot, c); }
+
+/* ---- Texture extended ------------------------------------------------------ */
+static inline void chasm_draw_texture_tiled(ChasmCtx *ctx, int64_t h, double sx, double sy, double sw, double sh, double dx, double dy, double dw, double dh, int64_t tint)
+    { (void)ctx; rl_draw_texture_tiled(h, sx, sy, sw, sh, dx, dy, dw, dh, tint); }
+static inline void chasm_set_texture_filter(ChasmCtx *ctx, int64_t h, int64_t filter)
+    { (void)ctx; rl_set_texture_filter(h, filter); }
+
+/* ---- Camera 2D ------------------------------------------------------------- */
+static inline void   chasm_camera2d_begin(ChasmCtx *ctx, double cx, double cy, double tx, double ty, double rot, double zoom)
+    { (void)ctx; rl_camera2d_begin(cx, cy, tx, ty, rot, zoom); }
+static inline void   chasm_camera2d_end(ChasmCtx *ctx)
+    { (void)ctx; rl_camera2d_end(); }
+static inline double chasm_world_to_screen_x(ChasmCtx *ctx, double wx, double wy, double cx, double cy, double tx, double ty, double rot, double zoom)
+    { (void)ctx; return rl_world_to_screen_x(wx, wy, cx, cy, tx, ty, rot, zoom); }
+static inline double chasm_world_to_screen_y(ChasmCtx *ctx, double wx, double wy, double cx, double cy, double tx, double ty, double rot, double zoom)
+    { (void)ctx; return rl_world_to_screen_y(wx, wy, cx, cy, tx, ty, rot, zoom); }
+
+/* ---- Gamepad --------------------------------------------------------------- */
+static inline bool   chasm_gamepad_available(ChasmCtx *ctx, int64_t pad)               { (void)ctx; return rl_gamepad_available(pad); }
+static inline bool   chasm_gamepad_button_down(ChasmCtx *ctx, int64_t pad, int64_t btn){ (void)ctx; return rl_gamepad_button_down(pad, btn); }
+static inline bool   chasm_gamepad_button_pressed(ChasmCtx *ctx, int64_t pad, int64_t btn){ (void)ctx; return rl_gamepad_button_pressed(pad, btn); }
+static inline double chasm_gamepad_axis(ChasmCtx *ctx, int64_t pad, int64_t axis)      { (void)ctx; return rl_gamepad_axis(pad, axis); }
+
+/* ---- Mouse extended -------------------------------------------------------- */
+static inline void chasm_set_mouse_pos(ChasmCtx *ctx, double x, double y) { (void)ctx; rl_set_mouse_pos(x, y); }
+static inline void chasm_mouse_cursor(ChasmCtx *ctx, int64_t cursor)      { (void)ctx; rl_mouse_cursor(cursor); }
+
+/* ---- Clipboard ------------------------------------------------------------- */
+static inline const char *chasm_get_clipboard(ChasmCtx *ctx)              { (void)ctx; return rl_get_clipboard(); }
+static inline void        chasm_set_clipboard(ChasmCtx *ctx, const char *text) { (void)ctx; rl_set_clipboard(text); }
+
 /* ---- Collision ------------------------------------------------------------- */
 static inline bool chasm_collide_rects(ChasmCtx *ctx, double x1, double y1, double w1, double h1,
                                         double x2, double y2, double w2, double h2)

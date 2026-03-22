@@ -1,5 +1,95 @@
 # Changelog
 
+## [0.8.0] — 2026-03-22 — Raylib extended bindings + multi-engine layout
+
+### Summary
+
+37 new Raylib 5.5 bindings across eight categories, a Shape Shooter demo game exercising them, a fix to `chasm run --engine raylib` (was incorrectly linking `main.c` into the binary instead of using the dylib path), and a reorganisation of the engine directory to support multiple future engines.
+
+### Raylib extended bindings (`engine/raylib/`)
+
+All four binding files updated atomically for each new function:
+
+- **Audio extended**: `sound_playing`, `sound_volume`, `sound_pitch`, `pause_sound`, `resume_sound`, `music_playing`, `music_volume`, `music_pitch`, `music_length`, `music_played`, `pause_music`, `resume_music`
+- **Window extended**: `window_resized`, `set_window_size`, `toggle_fullscreen`, `is_fullscreen`, `window_focused`
+- **Drawing extended**: `draw_triangle`, `draw_triangle_lines`, `draw_ellipse`, `draw_ring`, `draw_poly`
+- **Texture extended**: `draw_texture_tiled`, `set_texture_filter`
+- **Camera 2D**: `camera2d_begin`, `camera2d_end`, `world_to_screen_x`, `world_to_screen_y`
+- **Gamepad**: `gamepad_available`, `gamepad_button_down`, `gamepad_button_pressed`, `gamepad_axis`
+- **Mouse extended**: `set_mouse_pos`, `mouse_cursor`
+- **Clipboard**: `get_clipboard`, `set_clipboard`
+
+### Property-based tests (`cmd/cli/bindings_pbt_test.go`)
+
+New test suite using `pgregory.net/rapid`:
+
+- **P1** — binding symbol naming convention (`rl_<name>` for all new bindings)
+- **P4** — music played time invariant (`0 ≤ played ≤ length`)
+- **P5** — invalid handle safety (handles `≤ 0` or `≥ 1024` return zero/false)
+- **P7** — `toggle_fullscreen` idempotence (double-toggle restores original state)
+- **P8** — `CHASM_TO_RL_COLOR` channel extraction (R/G/B/A bit fields)
+- **P9** — `world_to_screen` identity under identity camera
+- **P10** — clipboard null guard (`get_clipboard` returns `""` not NULL)
+
+### Bug fix: `chasm run --engine raylib` (`cmd/cli/cli.go`)
+
+`buildAndRun` was calling `buildEngineCC` which linked `main.c` (a dlopen host) directly with the script C, producing a binary that immediately tried to `dlopen /tmp/chasm_script.dylib` and failed. Fixed: raylib mode now compiles a dylib via `compileSharedLib` and passes it to the engine binary, matching the watch-mode path.
+
+### Multi-engine directory layout
+
+Engine files moved from `engine/` flat into `engine/raylib/` to make room for future engines:
+
+```
+engine/
+  raylib/          ← all Raylib-specific files
+    main.c
+    loader.h
+    chasm_rl.h
+    chasm_rl_shim.h
+    chasm_rl_exports.c
+    chasm_rt.h
+    raylib.chasm
+    raylib-5.5_macos/
+  sdl/             ← placeholder for future SDL engine
+```
+
+CLI updated: `engineDir()` now returns `engine/` (top-level), `raylibEngineDir()` returns `engine/raylib/`. All path references in `compileSharedLib`, `buildEngineOnly`, and `buildEngineCC` updated accordingly.
+
+### Demo game (`examples/game/shape_shooter.chasm`)
+
+Shape Shooter — top-down arena shooter exercising the new bindings:
+- `draw_poly` (player pentagon), `draw_triangle` (nose), `draw_ring` (engine glow + enemies), `draw_ellipse` (bullets + enemy cores)
+- `camera2d_begin/end` for smooth follow camera
+- `gamepad_available`, `gamepad_axis`, `gamepad_button_pressed` for controller support
+- `window_focused` to dim the player and show a pause hint
+
+## [0.7.0] — 2026-03-21 — Hot-reload via dlopen + sentinel file
+
+### Summary
+
+True hot-reload for the Chasm/Raylib engine. The engine process stays alive across source edits; only the script `.dylib` is recompiled and swapped in-place each frame via `dlopen`. The window never closes during iteration.
+
+### Engine (`engine/main.c`, `engine/loader.h`)
+
+- `ChasmLoader` struct wraps `dlopen`/`dlsym`/`dlclose` and holds function pointers for `chasm_module_init`, `chasm_on_tick`, `chasm_on_draw`, `chasm_on_init`, `chasm_on_unload`, `chasm_reload_migrate`.
+- `chasm_loader_open` / `chasm_loader_reload` / `chasm_loader_close` manage the library lifecycle.
+- Failed reload (bad compile, missing symbols) leaves the old script running and prints to stderr — the window stays open.
+- Main loop polls for `/tmp/chasm_reload_ready` sentinel each frame (`access` call); on detection, unlinks sentinel and calls `chasm_loader_reload`.
+
+### Runtime (`runtime/chasm_rt.h`)
+
+- `chasm_clear_script(ctx)` added — resets the script arena bump pointer to 0 on each reload.
+- Persistent arena is never reset; `@persistent` variables survive hot-reload.
+
+### CLI (`cmd/cli/cli.go`)
+
+- `compileSharedLib` compiles the Chasm-generated C to a `.dylib` (macOS) or `.so` (Linux) with `-dynamiclib` / `-shared -fPIC`.
+- `buildEngineOnly` compiles `engine/main.c` once to `/tmp/chasm_engine`; the engine binary is cached and not rebuilt on every source change.
+- `runWatch` no longer kills and restarts the engine process. On a successful recompile it writes the sentinel file; the engine picks it up next frame.
+- Compile errors print to stderr and leave the old script running.
+
+---
+
 ## [0.6.0] — 2026-03-21 — String interpolation, range, multiple return values
 
 ### Summary

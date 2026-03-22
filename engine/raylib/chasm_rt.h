@@ -30,6 +30,10 @@ static inline void chasm_clear_frame(ChasmCtx *ctx) {
     ctx->frame.used = 0;
 }
 
+static inline void chasm_clear_script(ChasmCtx *ctx) {
+    ctx->script.used = 0;
+}
+
 /* Promote a scalar value to a longer-lived arena (primitive: no-op copy). */
 #define chasm_promote_scalar(val) (val)
 
