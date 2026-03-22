@@ -260,11 +260,17 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
       if elem_tid == -2 do
         return str_concat("chasm_array_push_fixed(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ac, ")"))))
       end
+      if elem_tid == -3 do
+        return str_concat("chasm_array_push_fixed_f(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ac, ")"))))
+      end
       return str_concat("chasm_array_push", str_concat(esuf, str_concat("(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ac, ")"))))))
     end
     if mn == "get" do
       arg_idx = ch.get(cs)
       ac = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arg_idx)
+      if elem_tid == -3 do
+        return str_concat("chasm_array_get_f(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ac, ")"))))
+      end
       return str_concat("chasm_array_get", str_concat(esuf, str_concat("(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ac, ")"))))))
     end
     if mn == "set" do
@@ -272,6 +278,9 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
       v_idx = ch.get(cs + 1)
       ic = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, i_idx)
       vc = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, v_idx)
+      if elem_tid == -3 do
+        return str_concat("chasm_array_set_f(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ic, str_concat(", ", str_concat(vc, ")"))))))
+      end
       return str_concat("chasm_array_set", str_concat(esuf, str_concat("(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ic, str_concat(", ", str_concat(vc, ")"))))))))
     end
     if mn == "pop" do
@@ -984,7 +993,14 @@ defp emit_fn(pool :: []Node, ch :: []int, types :: []int,
         if rinit_node.tag == :call do
           if rinit_node.name == "array_fixed" do
             rattr_name = str_slice(rdecl.name, 1, str_len(rdecl.name))
-            ve_len = ve_push(var_elems, ve_len, rattr_name, -2)
+            # Detect float vs int from default value arg (2nd arg if present)
+            fixed_elem_tid = -2
+            if rinit_node.b >= 2 do
+              def_arg_idx = ch.get(rinit_node.a + 1)
+              def_arg_t   = types.get(def_arg_idx)
+              if def_arg_t == 2 do fixed_elem_tid = -3 end
+            end
+            ve_len = ve_push(var_elems, ve_len, rattr_name, fixed_elem_tid)
           end
         end
       end
@@ -1046,6 +1062,8 @@ defp codegen(pool :: []Node, ch :: []int, root :: int,
     i = i + 1
   end
   if has_array_attr do
+    print("#ifndef CHASM_ARRAY_FIXED_HELPERS_DEFINED")
+    print("#define CHASM_ARRAY_FIXED_HELPERS_DEFINED")
     print("/* Arena-backed array helpers for @attr arrays */")
     print("/* array_fixed_in: allocates data from arena at fixed capacity — never grows. */")
     print("static inline ChasmArray chasm_array_fixed_in(ChasmArena *arena, int64_t cap) {")
@@ -1059,6 +1077,25 @@ defp codegen(pool :: []Node, ch :: []int, root :: int,
     print("    (void)ctx;")
     print("    if (a->len >= a->cap) { fprintf(stderr, \"chasm: array_fixed overflow (cap=%lld)\\n\", (long long)a->cap); abort(); }")
     print("    ((int64_t*)a->data)[a->len++] = v;")
+    print("}")
+    print("/* array_fixed_in_f / push_fixed_f / get_f / set_f: float (double) element variants. */")
+    print("static inline ChasmArray chasm_array_fixed_in_f(ChasmArena *arena, int64_t cap) {")
+    print("    if (cap <= 0) cap = 8;")
+    print("    void *d = chasm_alloc(arena, (size_t)cap * sizeof(double), 8);")
+    print("    if (!d) return (ChasmArray){NULL, 0, 0};")
+    print("    return (ChasmArray){d, 0, cap};")
+    print("}")
+    print("static inline void chasm_array_push_fixed_f(ChasmCtx *ctx, ChasmArray *a, double v) {")
+    print("    (void)ctx;")
+    print("    if (a->len >= a->cap) { fprintf(stderr, \"chasm: array_fixed overflow (cap=%lld)\\n\", (long long)a->cap); abort(); }")
+    print("    ((double*)a->data)[a->len++] = v;")
+    print("}")
+    print("static inline double chasm_array_get_f(ChasmCtx *ctx, ChasmArray *a, int64_t i) {")
+    print("    (void)ctx; if (i < 0 || i >= a->len) return 0.0;")
+    print("    return ((double*)a->data)[i];")
+    print("}")
+    print("static inline void chasm_array_set_f(ChasmCtx *ctx, ChasmArray *a, int64_t i, double v) {")
+    print("    (void)ctx; if (i >= 0 && i < a->len) ((double*)a->data)[i] = v;")
     print("}")
     print("/* array_new_in: arena-backed growable array (bump-copy on growth). */")
     print("static inline ChasmArray chasm_array_new_in(ChasmArena *arena, int64_t cap) {")
@@ -1076,6 +1113,7 @@ defp codegen(pool :: []Node, ch :: []int, root :: int,
     print("    }")
     print("    if (a->data) ((int64_t*)a->data)[a->len++] = v;")
     print("}")
+    print("#endif /* CHASM_ARRAY_FIXED_HELPERS_DEFINED */")
     print("")
   end
   # Emit module-level @attr globals
@@ -1115,8 +1153,21 @@ defp codegen(pool :: []Node, ch :: []int, root :: int,
           init_node = pool.get(decl.a)
           cap_c = "8"
           is_fixed = false
+          fixed_elem_tid = -2
+          has_default = false
+          default_c = "0"
           if init_node.tag == :call do
-            if init_node.name == "array_fixed" do is_fixed = true end
+            if init_node.name == "array_fixed" do
+              is_fixed = true
+              # Detect float default from 2nd arg
+              if init_node.b >= 2 do
+                def_arg_idx = ch.get(init_node.a + 1)
+                def_arg_t   = types.get(def_arg_idx)
+                if def_arg_t == 2 do fixed_elem_tid = -3 end
+                default_c   = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, def_arg_idx)
+                has_default = true
+              end
+            end
             if init_node.b > 0 do
               cap_arg_idx = ch.get(init_node.a)
               cap_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, cap_arg_idx)
@@ -1126,8 +1177,20 @@ defp codegen(pool :: []Node, ch :: []int, root :: int,
           if decl.b == 1 do arena_expr = "&ctx->frame" end
           if decl.b == 3 do arena_expr = "&ctx->persistent" end
           if is_fixed do
-            print(str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_fixed_in(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, ");")))))))
-            ve_len = ve_push(var_elems, ve_len, attr_name, -2)
+            if fixed_elem_tid == -3 do
+              print(str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_fixed_in_f(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, ");")))))))
+            else
+              print(str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_fixed_in(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, ");")))))))
+            end
+            ve_len = ve_push(var_elems, ve_len, attr_name, fixed_elem_tid)
+            # Seed all slots with default value if provided
+            if has_default do
+              if fixed_elem_tid == -3 do
+                print(str_concat("  { int64_t _cap = ", str_concat(cap_c, str_concat("; for (int64_t _di = 0; _di < _cap; _di++) ((double*)g_", str_concat(attr_name, str_concat(".data)[_di] = ", str_concat(default_c, str_concat("; } g_", str_concat(attr_name, str_concat(".len = ", str_concat(cap_c, ";")))))))))))
+              else
+                print(str_concat("  { int64_t _cap = ", str_concat(cap_c, str_concat("; for (int64_t _di = 0; _di < _cap; _di++) ((int64_t*)g_", str_concat(attr_name, str_concat(".data)[_di] = ", str_concat(default_c, str_concat("; } g_", str_concat(attr_name, str_concat(".len = ", str_concat(cap_c, ";")))))))))))
+              end
+            end
           else
             print(str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_new_in(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, ");")))))))
           end

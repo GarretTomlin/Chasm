@@ -1,4 +1,4 @@
 def main() do
   print("Hello from Chasm!")
-  print(1 + 19)
+  print(5 + 19)
 end

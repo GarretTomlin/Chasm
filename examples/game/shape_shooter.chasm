@@ -23,16 +23,16 @@
 
 # ---- Bullets — 4 slots, arena-backed fixed arrays ---------------------------
 # Each array holds one field per bullet slot (x, y, vel_x, vel_y, active)
-@bullet_x      :: script = array_fixed(4)
-@bullet_y      :: script = array_fixed(4)
-@bullet_vel_x  :: script = array_fixed(4)
-@bullet_vel_y  :: script = array_fixed(4)
-@bullet_active :: script = array_fixed(4)
+@bullet_x      :: script = array_fixed(4, 0.0)
+@bullet_y      :: script = array_fixed(4, 0.0)
+@bullet_vel_x  :: script = array_fixed(4, 0.0)
+@bullet_vel_y  :: script = array_fixed(4, 0.0)
+@bullet_active :: script = array_fixed(4, 0)
 
 # ---- Enemies — 8 slots, arena-backed fixed arrays ---------------------------
-@enemy_x     :: script = array_fixed(8)
-@enemy_y     :: script = array_fixed(8)
-@enemy_alive :: script = array_fixed(8)
+@enemy_x     :: script = array_fixed(8, 0.0)
+@enemy_y     :: script = array_fixed(8, 0.0)
+@enemy_alive :: script = array_fixed(8, 0)
 
 # ---- Score / game state -----------------------------------------------------
 @score      :: script     = 0
@@ -45,37 +45,26 @@
 # ---- Module init: seed bullet and enemy arrays ------------------------------
 
 def on_init() do
-  # Seed bullet slots (all inactive)
-  slot = 0
-  while slot < 4 do
-    @bullet_x.push(0)
-    @bullet_y.push(0)
-    @bullet_vel_x.push(0)
-    @bullet_vel_y.push(0)
-    @bullet_active.push(0)
-    slot = slot + 1
-  end
-  # Seed enemy spawn positions (8 enemies around the arena)
-  @enemy_x.push(100)
-  @enemy_y.push(100)
-  @enemy_x.push(700)
-  @enemy_y.push(100)
-  @enemy_x.push(100)
-  @enemy_y.push(500)
-  @enemy_x.push(700)
-  @enemy_y.push(500)
-  @enemy_x.push(400)
-  @enemy_y.push(80)
-  @enemy_x.push(400)
-  @enemy_y.push(520)
-  @enemy_x.push(80)
-  @enemy_y.push(300)
-  @enemy_x.push(720)
-  @enemy_y.push(300)
-  slot = 0
-  while slot < 8 do
-    @enemy_alive.push(1)
-    slot = slot + 1
+  # Bullet slots seeded to 0.0/0 by array_fixed defaults — no push needed
+  # Set enemy spawn positions (8 enemies around the arena)
+  @enemy_x.set(0, 100.0)
+  @enemy_y.set(0, 100.0)
+  @enemy_x.set(1, 700.0)
+  @enemy_y.set(1, 100.0)
+  @enemy_x.set(2, 100.0)
+  @enemy_y.set(2, 500.0)
+  @enemy_x.set(3, 700.0)
+  @enemy_y.set(3, 500.0)
+  @enemy_x.set(4, 400.0)
+  @enemy_y.set(4, 80.0)
+  @enemy_x.set(5, 400.0)
+  @enemy_y.set(5, 520.0)
+  @enemy_x.set(6, 80.0)
+  @enemy_y.set(6, 300.0)
+  @enemy_x.set(7, 720.0)
+  @enemy_y.set(7, 300.0)
+  for i in 0..8 do
+    @enemy_alive.set(i, 1)
   end
 end
 
@@ -97,10 +86,8 @@ end
 
 defp enemies_remaining() :: int do
   count :: frame = 0
-  i = 0
-  while i < 8 do
+  for i in 0..8 do
     count = count + @enemy_alive.get(i)
-    i = i + 1
   end
   return count
 end
@@ -111,93 +98,81 @@ defp spawn_bullet(angle :: float) do
   speed    :: frame = 420.0
   dir_x_v  :: frame = dir_x(angle)
   dir_y_v  :: frame = dir_y(angle)
-  slot = 0
-  while slot < 4 do
+  for slot in 0..4 do
     if @bullet_active.get(slot) == 0 do
-      @bullet_x.set(slot, to_int(@player_x))
-      @bullet_y.set(slot, to_int(@player_y))
-      @bullet_vel_x.set(slot, to_int(dir_x_v * speed))
-      @bullet_vel_y.set(slot, to_int(dir_y_v * speed))
+      @bullet_x.set(slot, @player_x)
+      @bullet_y.set(slot, @player_y)
+      @bullet_vel_x.set(slot, dir_x_v * speed)
+      @bullet_vel_y.set(slot, dir_y_v * speed)
       @bullet_active.set(slot, 1)
       return
     end
-    slot = slot + 1
   end
 end
 
 defp move_bullets(dt :: float) do
-  slot = 0
-  while slot < 4 do
+  for slot in 0..4 do
     if @bullet_active.get(slot) == 1 do
-      new_x :: frame = to_float(@bullet_x.get(slot)) + to_float(@bullet_vel_x.get(slot)) * dt
-      new_y :: frame = to_float(@bullet_y.get(slot)) + to_float(@bullet_vel_y.get(slot)) * dt
-      @bullet_x.set(slot, to_int(new_x))
-      @bullet_y.set(slot, to_int(new_y))
+      new_x :: frame = @bullet_x.get(slot) + @bullet_vel_x.get(slot) * dt
+      new_y :: frame = @bullet_y.get(slot) + @bullet_vel_y.get(slot) * dt
+      @bullet_x.set(slot, new_x)
+      @bullet_y.set(slot, new_y)
       if new_x < 0.0 or new_x > @world_width or new_y < 0.0 or new_y > @world_height do
         @bullet_active.set(slot, 0)
       end
     end
-    slot = slot + 1
   end
 end
 
 # ---- Enemy logic ------------------------------------------------------------
 
 defp move_enemies(dt :: float) do
-  i = 0
-  while i < 8 do
+  for i in 0..8 do
     if @enemy_alive.get(i) == 1 do
-      ex    :: frame = to_float(@enemy_x.get(i))
-      ey    :: frame = to_float(@enemy_y.get(i))
+      ex    :: frame = @enemy_x.get(i)
+      ey    :: frame = @enemy_y.get(i)
       dx    :: frame = @player_x - ex
       dy    :: frame = @player_y - ey
       dist  :: frame = sqrt(dx * dx + dy * dy)
       if dist > 1.0 do
-        @enemy_x.set(i, to_int(ex + (dx / dist) * 60.0 * dt))
-        @enemy_y.set(i, to_int(ey + (dy / dist) * 60.0 * dt))
+        @enemy_x.set(i, ex + (dx / dist) * 60.0 * dt)
+        @enemy_y.set(i, ey + (dy / dist) * 60.0 * dt)
       end
     end
-    i = i + 1
   end
 end
 
 # ---- Collision detection ----------------------------------------------------
 
 defp check_bullet_enemy_hits() do
-  bullet = 0
-  while bullet < 4 do
+  for bullet in 0..4 do
     if @bullet_active.get(bullet) == 1 do
-      bx :: frame = to_float(@bullet_x.get(bullet))
-      by :: frame = to_float(@bullet_y.get(bullet))
-      enemy = 0
-      while enemy < 8 do
+      bx :: frame = @bullet_x.get(bullet)
+      by :: frame = @bullet_y.get(bullet)
+      for enemy in 0..8 do
         if @enemy_alive.get(enemy) == 1 do
-          ex :: frame = to_float(@enemy_x.get(enemy))
-          ey :: frame = to_float(@enemy_y.get(enemy))
+          ex :: frame = @enemy_x.get(enemy)
+          ey :: frame = @enemy_y.get(enemy)
           if distance(bx, by, ex, ey) < 22.0 do
             @enemy_alive.set(enemy, 0)
             @bullet_active.set(bullet, 0)
             @score = @score + 100
           end
         end
-        enemy = enemy + 1
       end
     end
-    bullet = bullet + 1
   end
 end
 
 defp check_player_enemy_hits() do
-  i = 0
-  while i < 8 do
+  for i in 0..8 do
     if @enemy_alive.get(i) == 1 do
-      ex :: frame = to_float(@enemy_x.get(i))
-      ey :: frame = to_float(@enemy_y.get(i))
+      ex :: frame = @enemy_x.get(i)
+      ey :: frame = @enemy_y.get(i)
       if distance(@player_x, @player_y, ex, ey) < 20.0 do
         @game_over = 1
       end
     end
-    i = i + 1
   end
 end
 
@@ -212,31 +187,27 @@ defp reset_game() do
   @win = 0
   @time_alive = 0.0
   @shoot_cooldown = 0.0
-  slot = 0
-  while slot < 4 do
+  for slot in 0..4 do
     @bullet_active.set(slot, 0)
-    slot = slot + 1
   end
-  @enemy_x.set(0, 100)
-  @enemy_y.set(0, 100)
-  @enemy_x.set(1, 700)
-  @enemy_y.set(1, 100)
-  @enemy_x.set(2, 100)
-  @enemy_y.set(2, 500)
-  @enemy_x.set(3, 700)
-  @enemy_y.set(3, 500)
-  @enemy_x.set(4, 400)
-  @enemy_y.set(4, 80)
-  @enemy_x.set(5, 400)
-  @enemy_y.set(5, 520)
-  @enemy_x.set(6, 80)
-  @enemy_y.set(6, 300)
-  @enemy_x.set(7, 720)
-  @enemy_y.set(7, 300)
-  i = 0
-  while i < 8 do
+  @enemy_x.set(0, 100.0)
+  @enemy_y.set(0, 100.0)
+  @enemy_x.set(1, 700.0)
+  @enemy_y.set(1, 100.0)
+  @enemy_x.set(2, 100.0)
+  @enemy_y.set(2, 500.0)
+  @enemy_x.set(3, 700.0)
+  @enemy_y.set(3, 500.0)
+  @enemy_x.set(4, 400.0)
+  @enemy_y.set(4, 80.0)
+  @enemy_x.set(5, 400.0)
+  @enemy_y.set(5, 520.0)
+  @enemy_x.set(6, 80.0)
+  @enemy_y.set(6, 300.0)
+  @enemy_x.set(7, 720.0)
+  @enemy_y.set(7, 300.0)
+  for i in 0..8 do
     @enemy_alive.set(i, 1)
-    i = i + 1
   end
 end
 
@@ -263,8 +234,8 @@ def on_tick(dt :: float) do
   if gamepad_available(0) do
     axis_x :: frame = gamepad_axis(0, 0)
     axis_y :: frame = gamepad_axis(0, 1)
-    if axis_x > 0.15 or axis_x < 0.0 - 0.15 do input_x = input_x + axis_x end
-    if axis_y > 0.15 or axis_y < 0.0 - 0.15 do input_y = input_y + axis_y end
+    if axis_x > 0.15 or axis_x < -0.15 do input_x = input_x + axis_x end
+    if axis_y > 0.15 or axis_y < -0.15 do input_y = input_y + axis_y end
   end
 
   # Normalize diagonal movement
@@ -368,24 +339,20 @@ def on_draw() do
   draw_arena()
 
   # Draw enemies
-  i = 0
-  while i < 8 do
+  for i in 0..8 do
     if @enemy_alive.get(i) == 1 do
-      draw_enemy(to_float(@enemy_x.get(i)), to_float(@enemy_y.get(i)), @time_alive)
+      draw_enemy(@enemy_x.get(i), @enemy_y.get(i), @time_alive)
     end
-    i = i + 1
   end
 
   # Draw bullets
-  slot = 0
-  while slot < 4 do
+  for slot in 0..4 do
     if @bullet_active.get(slot) == 1 do
-      bx :: frame = to_float(@bullet_x.get(slot))
-      by :: frame = to_float(@bullet_y.get(slot))
+      bx :: frame = @bullet_x.get(slot)
+      by :: frame = @bullet_y.get(slot)
       draw_ellipse(bx, by, 5.0, 3.0, 0xFFFF44FF)
       draw_circle(bx, by, 3.0, 0xFFFFAAFF)
     end
-    slot = slot + 1
   end
 
   draw_player(@player_x, @player_y, @player_angle, focused)

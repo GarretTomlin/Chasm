@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.1.0] — 2026-03-22 — Raylib runtime fixes + clean CC error output
+
+### Summary
+
+Two runtime bugs fixed for `chasm run --engine raylib`: extra `)` in the array seeding loop (generated invalid C), and missing helpers in `engine/raylib/chasm_rt.h` (`chasm_range`, fixed-array helpers). CC errors are now filtered and reformatted as clean Chasm-style diagnostics instead of leaking raw `/tmp/chasm_out.c:LINE:COL:` clang output.
+
+### Bug fixes
+
+- `compiler/codegen.chasm` — seeding loop for `array_fixed(N, default)` emitted `((double*)g_name.data))[_di]` (extra `)`). Fixed to `.data)[_di]`.
+- `engine/raylib/chasm_rt.h` — added `chasm_range`, `chasm_array_fixed_in`, `chasm_array_push_fixed`, `chasm_array_fixed_in_f`, `chasm_array_push_fixed_f`, `chasm_array_get_f`, `chasm_array_set_f`, `chasm_array_new_in`. These were present in `runtime/chasm_rt.h` and emitted inline by codegen but missing from the raylib engine header.
+- `compiler/codegen.chasm` — the inline helper block is now guarded with `#ifndef CHASM_ARRAY_FIXED_HELPERS_DEFINED` / `#endif`; the raylib header defines the macro before its own copies, preventing redefinition errors when compiling in raylib mode.
+
+### CLI: clean CC error output (`cmd/cli/cli.go`)
+
+`compileSharedLib` and the standalone `cc` call now capture cc stderr instead of passing it through raw. `filterCCErrors` parses clang's `file:line:col: severity: message` format and reformats it:
+
+```
+error[CC]: redefinition of 'chasm_array_fixed_in'
+  --> generated C, line 114
+  --> source: examples/game/shape_shooter.chasm
+```
+
+`note:` lines (internal C cross-references) are suppressed. Lines from engine headers pass through unchanged.
+
+### Bootstrap
+
+Bootstrap binary rebuilt and three-stage fixpoint verified (`stage2.c == stage3.c`).
+
 ## [1.0.0] — 2026-03-22 — Arena-backed arrays + complete lifetime enforcement
 
 ### Summary

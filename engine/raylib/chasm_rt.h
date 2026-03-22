@@ -252,6 +252,52 @@ static inline void    chasm_array_set (ChasmCtx *ctx, ChasmArray *a, int64_t i, 
 static inline int64_t chasm_array_len (ChasmCtx *ctx, ChasmArray *a)                     { (void)ctx; return a->len; }
 static inline void    chasm_array_clear(ChasmCtx *ctx, ChasmArray *a)                    { (void)ctx; a->len=0; }
 
+/* ---- range / for-in support -------------------------------------- */
+static inline ChasmArray chasm_range(ChasmCtx *ctx, int64_t lo, int64_t hi) {
+    int64_t n = hi > lo ? hi - lo : 0;
+    ChasmArray a = chasm_array_new(ctx, n > 0 ? n : 1);
+    for (int64_t i = 0; i < n; i++) chasm_array_push(ctx, &a, lo + i);
+    return a;
+}
+
+/* ---- arena-backed fixed arrays (used by array_fixed(@attr)) ------ */
+#define CHASM_ARRAY_FIXED_HELPERS_DEFINED
+static inline ChasmArray chasm_array_fixed_in(ChasmArena *arena, int64_t cap) {
+    if (cap <= 0) cap = 8;
+    void *d = chasm_alloc(arena, (size_t)cap * 8, 8);
+    if (!d) return (ChasmArray){NULL, 0, 0};
+    return (ChasmArray){d, 0, cap};
+}
+static inline void chasm_array_push_fixed(ChasmCtx *ctx, ChasmArray *a, int64_t v) {
+    (void)ctx;
+    if (a->len >= a->cap) { fprintf(stderr, "chasm: array_fixed overflow (cap=%lld)\n", (long long)a->cap); abort(); }
+    ((int64_t*)a->data)[a->len++] = v;
+}
+static inline ChasmArray chasm_array_fixed_in_f(ChasmArena *arena, int64_t cap) {
+    if (cap <= 0) cap = 8;
+    void *d = chasm_alloc(arena, (size_t)cap * sizeof(double), 8);
+    if (!d) return (ChasmArray){NULL, 0, 0};
+    return (ChasmArray){d, 0, cap};
+}
+static inline void chasm_array_push_fixed_f(ChasmCtx *ctx, ChasmArray *a, double v) {
+    (void)ctx;
+    if (a->len >= a->cap) { fprintf(stderr, "chasm: array_fixed overflow (cap=%lld)\n", (long long)a->cap); abort(); }
+    ((double*)a->data)[a->len++] = v;
+}
+static inline double chasm_array_get_f(ChasmCtx *ctx, ChasmArray *a, int64_t i) {
+    (void)ctx; if (i < 0 || i >= a->len) return 0.0;
+    return ((double*)a->data)[i];
+}
+static inline void chasm_array_set_f(ChasmCtx *ctx, ChasmArray *a, int64_t i, double v) {
+    (void)ctx; if (i >= 0 && i < a->len) ((double*)a->data)[i] = v;
+}
+static inline ChasmArray chasm_array_new_in(ChasmArena *arena, int64_t cap) {
+    if (cap <= 0) cap = 8;
+    void *d = chasm_alloc(arena, (size_t)cap * 8, 8);
+    if (!d) return (ChasmArray){NULL, 0, 0};
+    return (ChasmArray){d, 0, cap};
+}
+
 /* ---- i/o --------------------------------------------------------- */
 static inline void chasm_print(ChasmCtx *ctx, int64_t v)       { (void)ctx; printf("%lld\n", (long long)v); }
 static inline void chasm_print_f(ChasmCtx *ctx, double v)      { (void)ctx; printf("%g\n", v); }

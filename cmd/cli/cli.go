@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const version = "0.9.0"
+const version = "1.1.0"
 
 // defaultChasmHome is baked in at build time by install.sh:
 //
@@ -331,10 +331,12 @@ func buildAndRun(path string, opts options, quiet bool, procOut **exec.Cmd) {
 
 	cc := exec.Command(ccArgs[0], ccArgs[1:]...)
 	cc.Stdout = os.Stdout
-	cc.Stderr = os.Stderr
+	var ccStderr strings.Builder
+	cc.Stderr = &ccStderr
 	if err := cc.Run(); err != nil {
+		filterCCErrors([]byte(ccStderr.String()), path)
 		if !quiet {
-			fatalf("cc failed: %v\n", err)
+			fatalf("cc failed\n")
 		}
 		return
 	}
@@ -394,8 +396,10 @@ func compileSharedLib(path string, opts options) (string, error) {
 
 	cc := exec.Command(args[0], args[1:]...)
 	cc.Stdout = os.Stdout
-	cc.Stderr = os.Stderr
+	var ccStderr strings.Builder
+	cc.Stderr = &ccStderr
 	if err := cc.Run(); err != nil {
+		filterCCErrors([]byte(ccStderr.String()), path)
 		return "", err
 	}
 	return scriptPath, nil
@@ -739,6 +743,66 @@ func copyFile(src, dst string) error {
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "chasm: "+format, args...)
 	os.Exit(1)
+}
+
+// filterCCErrors captures cc stderr and reformats clang-style diagnostics into
+// clean Chasm-style output. Lines referencing /tmp/chasm_out.c are translated
+// to hide the internal path; other lines pass through unchanged.
+//
+// Format in:  /tmp/chasm_out.c:114:26: error: redefinition of 'foo'
+// Format out:
+//
+//	error[CC]: redefinition of 'foo'
+//	  --> (generated C, line 114)
+func filterCCErrors(raw []byte, chasmSrc string) {
+	lines := strings.Split(string(raw), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		// Try to match clang's  file:line:col: severity: message  pattern.
+		// We only reformat lines that reference our temp file.
+		if strings.HasPrefix(line, "/tmp/chasm_out.c:") || strings.HasPrefix(line, "/tmp/chasm_script_") {
+			// Strip the file prefix: split on first 3 colons.
+			rest := line
+			// Remove the file path prefix up to and including the first ':'
+			if idx := strings.Index(rest, ":"); idx >= 0 {
+				rest = rest[idx+1:] // "114:26: error: msg"
+			}
+			// Extract line number
+			lineNum := ""
+			if idx := strings.Index(rest, ":"); idx >= 0 {
+				lineNum = rest[:idx]
+				rest = rest[idx+1:] // "26: error: msg"
+			}
+			// Skip col number
+			if idx := strings.Index(rest, ":"); idx >= 0 {
+				rest = rest[idx+1:] // " error: msg"
+			}
+			rest = strings.TrimSpace(rest)
+			// Split severity from message
+			severity := "error"
+			msg := rest
+			if idx := strings.Index(rest, ":"); idx >= 0 {
+				severity = strings.TrimSpace(rest[:idx])
+				msg = strings.TrimSpace(rest[idx+1:])
+			}
+			if severity == "note" {
+				// notes are noise from internal C — skip them
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "%s[CC]: %s\n", severity, msg)
+			if lineNum != "" {
+				fmt.Fprintf(os.Stderr, "  --> generated C, line %s\n", lineNum)
+			}
+			if chasmSrc != "" {
+				fmt.Fprintf(os.Stderr, "  --> source: %s\n", chasmSrc)
+			}
+		} else {
+			// Pass through non-temp-file lines (e.g. engine header errors)
+			fmt.Fprintln(os.Stderr, line)
+		}
+	}
 }
 
 func usage() {

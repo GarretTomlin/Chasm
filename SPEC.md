@@ -46,6 +46,23 @@ Frame  <  Script  <  Persistent
 
 Values can only flow **upward** — from shorter to longer lifetimes. Assigning a `frame`-lifetime value to a `script` variable is a compile error unless you use an explicit promotion function.
 
+### Lifetime inference
+
+The compiler infers the lifetime of every expression:
+
+| Expression form | Inferred lifetime |
+|---|---|
+| `@attr` reference | The attr's declared lifetime |
+| Literal (`0`, `0.0`, `true`, `:atom`) | Persistent — assignable anywhere |
+| Local variable | Frame |
+| `f(a, b, ...)` call | Max lifetime of all arguments |
+| `recv.method(a, ...)` call | Max lifetime of receiver + arguments |
+| `a + b`, `a * b`, etc. | Max lifetime of both operands |
+| `copy_to_script(x)` | Script |
+| `persist_copy(x)` | Persistent |
+
+This means expressions that involve `@script` attrs automatically carry script lifetime, so assigning them back to a `@script` attr is fine without promotion. Only when a frame-local value (e.g. a computed delta from `dt`) flows into a longer-lived attr does the compiler require an explicit promotion call.
+
 ### Promotion Functions
 
 | Function | Effect |
@@ -63,8 +80,8 @@ Values can only flow **upward** — from shorter to longer lifetimes. Assigning 
 | `float` | 64-bit IEEE 754 float | `0.0`, `3.14`, `-1.5` |
 | `bool` | Boolean | `true`, `false` |
 | `string` | Immutable UTF-8 byte string | `"hello"` |
-| `atom` | Compile-time symbol (maps to int constant) | `:idle`, `:running` |
-| `[]T` | Growable typed array of element type `T` | `array_new(8)` |
+| `atom` | Compile-time symbol (maps to string constant) | `:idle`, `:running` |
+| `[]T` | Array of element type `T` | `array_new(8)`, `array_fixed(8)`, `array_fixed(8, 0.0)` |
 | `strbuild` | Mutable string builder | `str_builder_new()` |
 | `StructName` | User-defined struct (value type) | `Vec2 { x: 0.0, y: 0.0 }` |
 | `EnumName` | Tagged enum (with optional payload) | `State.Idle` |
@@ -240,7 +257,7 @@ end
 
 def record(score :: int) do
   if score > @best do
-    @best = score
+    @best = persist_copy(score)
   end
 end
 
@@ -249,6 +266,14 @@ end
 
 def init() do
   @font = load_font("assets/mono.ttf")
+end
+
+# Fixed-capacity arena-backed array (no heap, lifetime-safe)
+# Float array — all slots pre-filled, no push loop needed
+@positions :: script = array_fixed(8, 0.0)
+
+def on_tick(dt :: float) do
+  @positions.set(0, @player_x)   # direct float — no to_int/to_float casting
 end
 ```
 
@@ -402,26 +427,75 @@ Arms are matched top to bottom. `_` is the catch-all.
 
 ## Arrays
 
+Arrays come in two flavors depending on where they live.
+
+### `array_new(N)` — heap-backed, growable
+
+For local variables and function-scoped data. Allocates from the heap and grows automatically via `realloc`.
+
 ```chasm
 arr :: []int = array_new(4)
 arr.push(10)
 arr.push(20)
-x = arr[1]      # 20
-arr[0] = 99
-n = arr.len     # 2
+x = arr.get(1)   # 20
+arr.set(0, 99)
+n = arr.len      # 2
 arr.clear()
 ```
 
-| Method / syntax | Equivalent | Description |
-|---|---|---|
-| `arr.len` | `array_len(arr)` | Number of elements |
-| `arr.push(v)` | `array_push(arr, v)` | Append a value |
-| `arr.pop()` | `array_pop(arr)` | Remove and return last value |
-| `arr[i]` | `array_get(arr, i)` | Read element at index |
-| `arr[i] = v` | `array_set(arr, i, v)` | Write element at index |
-| `arr.clear()` | `array_clear(arr)` | Reset length to 0 |
+### `array_fixed(N)` — arena-backed, fixed capacity
 
-Array literals `[a, b, c]` desugar to `array_new` + `push` calls.
+For module attributes (`@name`). Allocates from the arena that matches the attribute's declared lifetime — no heap, no `malloc`, no GC. The capacity is fixed at declaration time; pushing beyond it aborts with an error.
+
+```chasm
+@bullets :: script     = array_fixed(8)       # int array, seeded via push
+@sparks  :: frame      = array_fixed(32)      # wiped every tick — zero per-element cost
+@records :: persistent = array_fixed(4)       # never reset
+```
+
+**Typed arrays with a default value** — pass a second argument to `array_fixed` to declare the element type and pre-fill all slots at init time. The type is inferred from the default literal: an integer default gives `[]int`, a float default gives `[]float`.
+
+```chasm
+@bullet_x :: script = array_fixed(4, 0.0)   # []float, all slots initialised to 0.0
+@bullet_y :: script = array_fixed(4, 0.0)   # []float
+@active   :: script = array_fixed(4, 0)     # []int,   all slots initialised to 0
+```
+
+With a default, `on_init` needs no push loop — all slots are ready immediately. `get`/`set` on a float array return and accept `float` directly, with no `to_float`/`to_int` casting required.
+
+The array header and data are one contiguous allocation inside the arena. On hot-reload the script arena resets and `chasm_module_init` re-initialises the array automatically — no manual cleanup needed.
+
+Use `array_fixed` for any module-level array where the maximum size is known upfront. Use `array_new` for local scratch arrays inside functions.
+
+### Methods (both kinds)
+
+| Method | Description |
+|---|---|
+| `arr.len` | Number of elements currently stored |
+| `arr.push(v)` | Append a value (`array_fixed` aborts on overflow) |
+| `arr.get(i)` | Read element at index |
+| `arr.set(i, v)` | Write element at index |
+| `arr.pop()` | Remove and return last value |
+| `arr.clear()` | Reset length to 0 (capacity unchanged) |
+
+### Lifetime enforcement for arrays
+
+The compiler enforces the same lifetime rules for arrays as for scalars. Assigning a `frame`-lifetime value to a `script` array attribute is a compile error:
+
+```chasm
+@positions :: script = array_fixed(8)
+
+def on_tick(dt :: float) do
+  local_val :: frame = compute()
+  @positions.set(0, local_val)   # OK — set() is a statement, not an assignment to @attr
+  @positions = something_frame   # ERROR E008: lifetime violation
+end
+```
+
+The `expr_lifetime` rules for arrays:
+- A call result carries the **max lifetime of its arguments** — so `clamp(@player_x + delta, ...)` is script-lifetime because `@player_x` is script.
+- A method call result carries the **max lifetime of the receiver and all arguments**.
+- Literals (`0`, `0.0`, `true`, `:atom`) are persistent-lifetime — assignable anywhere without promotion.
 
 ---
 
@@ -459,20 +533,74 @@ sub = s.slice(6, 11)  # "world"
 |---|---|---|
 | `abs(v)` | `float` | Absolute value |
 | `sqrt(v)` | `float` | Square root |
+| `pow(b, e)` | `float` | `b` raised to the power `e` |
 | `sin(v)` | `float` | Sine (radians) |
 | `cos(v)` | `float` | Cosine (radians) |
 | `tan(v)` | `float` | Tangent (radians) |
-| `atan2(y, x)` | `float` | Arctangent |
+| `atan2(y, x)` | `float` | Arctangent of `y/x` |
 | `floor(v)` | `float` | Round down |
 | `ceil(v)` | `float` | Round up |
 | `round(v)` | `float` | Round to nearest |
-| `min(a, b)` | `float` | Minimum |
-| `max(a, b)` | `float` | Maximum |
-| `clamp(v, lo, hi)` | `float` | Clamp between lo and hi |
-| `scale(v, factor)` | `float` | Multiply v by factor |
+| `fract(v)` | `float` | Fractional part (`v - floor(v)`) |
+| `sign(v)` | `float` | `-1.0`, `0.0`, or `1.0` |
+| `min(a, b)` | `float` | Minimum of two values |
+| `max(a, b)` | `float` | Maximum of two values |
+| `clamp(v, lo, hi)` | `float` | Clamp `v` between `lo` and `hi` |
+| `wrap(v, lo, hi)` | `float` | Wrap `v` into `[lo, hi)` |
+| `snap(v, step)` | `float` | Round `v` to nearest multiple of `step` |
+| `scale(v, factor)` | `float` | Multiply `v` by `factor` |
 | `lerp(a, b, t)` | `float` | Linear interpolation |
+| `smooth_step(a, b, t)` | `float` | Smooth Hermite interpolation |
+| `smoother_step(a, b, t)` | `float` | Smoother 5th-order interpolation |
+| `ping_pong(t, len)` | `float` | Bounce `t` back and forth over `[0, len]` |
+| `move_toward(cur, target, step)` | `float` | Move `cur` toward `target` by at most `step` |
+| `angle_diff(a, b)` | `float` | Shortest signed angle difference (radians) |
 | `deg_to_rad(d)` | `float` | Degrees to radians |
 | `rad_to_deg(r)` | `float` | Radians to degrees |
+
+### Vector math
+
+| Function | Returns | Description |
+|---|---|---|
+| `vec2_len(x, y)` | `float` | Length of 2D vector |
+| `vec2_dot(ax, ay, bx, by)` | `float` | Dot product |
+| `vec2_dist(ax, ay, bx, by)` | `float` | Distance between two points |
+| `vec2_angle(x, y)` | `float` | Angle of vector (radians) |
+| `vec2_cross(ax, ay, bx, by)` | `float` | 2D cross product (scalar) |
+| `vec2_norm_x(x, y)` | `float` | X component of normalised vector |
+| `vec2_norm_y(x, y)` | `float` | Y component of normalised vector |
+
+### Type conversion
+
+| Function | Returns | Description |
+|---|---|---|
+| `to_int(v)` | `int` | Convert float → int (truncates) |
+| `to_float(v)` | `float` | Convert int → float |
+| `to_bool(v)` | `bool` | Convert int → bool (`0` = false) |
+
+### Color
+
+| Function | Returns | Description |
+|---|---|---|
+| `rgb(r, g, b)` | `int` | Pack RGB into `0xRRGGBBFF` |
+| `rgba(r, g, b, a)` | `int` | Pack RGBA into `0xRRGGBBAA` |
+| `color_r(c)` | `int` | Extract red channel |
+| `color_g(c)` | `int` | Extract green channel |
+| `color_b(c)` | `int` | Extract blue channel |
+| `color_a(c)` | `int` | Extract alpha channel |
+| `color_lerp(a, b, t)` | `int` | Interpolate between two packed colors |
+| `color_mix(a, b, t)` | `int` | Alias for `color_lerp` |
+
+### Bitwise
+
+| Function | Returns | Description |
+|---|---|---|
+| `bit_and(a, b)` | `int` | Bitwise AND |
+| `bit_or(a, b)` | `int` | Bitwise OR |
+| `bit_xor(a, b)` | `int` | Bitwise XOR |
+| `bit_not(v)` | `int` | Bitwise NOT |
+| `bit_shl(v, n)` | `int` | Shift left by `n` bits |
+| `bit_shr(v, n)` | `int` | Shift right by `n` bits |
 
 ### Strings
 
@@ -559,7 +687,7 @@ pipe_expr     ::= cmp_expr ('|>' call_expr)*
 cmp_expr      ::= add_expr (cmp_op add_expr)*
 add_expr      ::= mul_expr (('+' | '-') mul_expr)*
 mul_expr      ::= unary_expr (('*' | '/') unary_expr)*
-unary_expr    ::= 'not' unary_expr | primary_expr
+unary_expr    ::= ('-' | 'not') unary_expr | primary_expr
 primary_expr  ::= literal | IDENT | '@' IDENT | call_expr | method_chain | struct_lit | array_lit | '(' expr ')'
 
 type          ::= 'int' | 'float' | 'bool' | 'string' | 'atom' | 'strbuild' | '[]' type | IDENT
@@ -573,7 +701,36 @@ lifetime      ::= 'frame' | 'script' | 'persistent'
 Chasm compiles to C99. The generated C:
 
 - Embeds `ChasmCtx*` in every function signature.
-- Uses three arena allocators (frame, script, persistent) — no heap allocation except for arrays.
+- Uses three arena allocators (frame, script, persistent) — **no heap allocation**. `array_fixed` module attributes allocate from the arena matching their declared lifetime; `array_new` local arrays use the heap only within function scope.
 - Produces a `chasm_rt.h` runtime header with all standard library implementations.
 - Is readable — variable names, struct names, and function names are preserved.
 - Has no hidden threads, no GC, no runtime beyond `libc`.
+
+### Array code generation
+
+For `@name :: lifetime = array_fixed(N)` the compiler emits an int array:
+
+```c
+static ChasmArray g_name;
+
+void chasm_module_init(ChasmCtx *ctx) {
+    g_name = chasm_array_fixed_in(&ctx->script, N);
+}
+```
+
+For `@name :: lifetime = array_fixed(N, 0.0)` (float default) the compiler emits a float array and pre-fills all slots:
+
+```c
+static ChasmArray g_name;
+
+void chasm_module_init(ChasmCtx *ctx) {
+    g_name = chasm_array_fixed_in_f(&ctx->script, N);
+    { int64_t _cap = N; for (int64_t _di = 0; _di < _cap; _di++) ((double*)g_name.data)[_di] = 0.0; g_name.len = N; }
+}
+```
+
+`get`/`set` on a float array use `double*` casts internally — the Chasm source sees plain `float` values with no manual conversion.
+
+`chasm_array_fixed_in` / `chasm_array_fixed_in_f` allocate `N × 8` bytes from the named arena in one contiguous block. `chasm_array_push_fixed` / `chasm_array_push_fixed_f` are bounds-checked pushes that abort on overflow — no realloc, no pointer invalidation.
+
+For `array_new(N)` inside a function the compiler emits `chasm_array_new(ctx, N)` which uses `malloc`/`realloc` and is scoped to the function call.
