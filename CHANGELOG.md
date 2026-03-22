@@ -1,5 +1,69 @@
 # Changelog
 
+## [1.0.0] — 2026-03-22 — Arena-backed arrays + complete lifetime enforcement
+
+### Summary
+
+`array_fixed(N)` lands as the canonical primitive for module-level arrays. Fixed-capacity arrays allocate from the arena matching their declared lifetime — no `malloc`, no heap, no GC. The lifetime model is now fully enforced for arrays and all expression forms. The shape_shooter demo is rewritten to use `array_fixed` for bullets and enemies.
+
+### `array_fixed(N)` — arena-backed fixed-capacity arrays (`compiler/codegen.chasm`)
+
+When a module attribute is declared as `@name :: lifetime = array_fixed(N)`, the compiler emits:
+
+```c
+static ChasmArray g_name;
+// in chasm_module_init:
+g_name = chasm_array_fixed_in(&ctx->script, N);
+```
+
+The `chasm_array_fixed_in` helper allocates `N × 8` bytes directly from the named arena — one contiguous allocation, no heap. `chasm_array_push_fixed` is a bounds-checked push that aborts on overflow instead of reallocating. Both helpers are emitted inline into the generated C only when needed.
+
+| Operation | Cost |
+|---|---|
+| `arr.get(i)` | Single pointer deref |
+| `arr.set(i, v)` | Bounds check + write |
+| `arr.push(v)` | Bounds check + write, aborts on overflow |
+| Frame array wipe | Bump pointer reset — zero per-element cost |
+| Script array on hot-reload | Arena reset + reinit |
+
+### Lifetime enforcement completed (`compiler/sema.chasm`)
+
+`expr_lifetime` now propagates through all expression forms:
+
+- **Builtin/user calls**: result lifetime is the max of all argument lifetimes (previously always returned frame)
+- **Method calls**: result lifetime is the max of receiver and argument lifetimes
+- **Literals**: return persistent (3) — compile-time constants are assignable anywhere
+- **Binop/unary**: max of operand lifetimes (unchanged)
+- **`@attr` refs**: carry the attr's declared lifetime (unchanged)
+
+This means `clamp(@px + move_x * @pspeed * dt, ...)` correctly infers script lifetime (from `@px`) and no longer false-positives as E008 when assigned back to `@px :: script`.
+
+### `builtin_ret` completed (`compiler/sema.chasm`)
+
+All math, conversion, color, and vector builtins added: `cos`, `sin`, `sqrt`, `deg_to_rad`, `rad_to_deg`, `atan2`, `clamp`, `to_int`, `to_float`, `to_bool`, `rgb`, `rgba`, `color_lerp`, `color_mix`, `bit_and/or/xor/not/shl/shr`, `vec2_*`, `smooth_step`, `move_toward`, `angle_diff`, and more.
+
+### Shape Shooter rewritten with `array_fixed` (`examples/game/shape_shooter.chasm`)
+
+Bullets (4 slots) and enemies (8 slots) now use `array_fixed` per-field arrays:
+
+```chasm
+@bx     :: script = array_fixed(4)
+@by     :: script = array_fixed(4)
+@bvx    :: script = array_fixed(4)
+@bvy    :: script = array_fixed(4)
+@bactive :: script = array_fixed(4)
+
+@ex     :: script = array_fixed(8)
+@ey     :: script = array_fixed(8)
+@ealive :: script = array_fixed(8)
+```
+
+Positions are stored as integers (via `to_int`/`to_float`) since `ChasmArray` elements are `int64_t`. Lifetime promotions are explicit: `copy_to_script()` for frame→script, `persist_copy()` for script→persistent.
+
+### Bootstrap
+
+Bootstrap binary rebuilt and three-stage fixpoint verified (`stage2.c == stage3.c`).
+
 ## [0.9.0] — 2026-03-22 — Rich compiler diagnostics + lifetime violation detection
 
 ### Summary

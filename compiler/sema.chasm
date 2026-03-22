@@ -122,13 +122,52 @@ defp expr_lifetime(pool :: []Node, ch :: []int, attrs :: []AttrInfo, idx :: int)
     end
     return 1
   end
-  # Promotion calls promote to their target lifetime
+  # Promotion calls promote to their target lifetime.
+  # Other calls: result lifetime is the max of all argument lifetimes.
   if tag == :call do
     if node.name == "copy_to_script" do return 2 end
     if node.name == "persist_copy"   do return 3 end
-    return 1
+    cs = node.a
+    cl = node.b
+    max_lt = 1
+    ai = 0
+    while ai < cl do
+      arg_lt = expr_lifetime(pool, ch, attrs, ch.get(cs + ai))
+      if arg_lt > max_lt do max_lt = arg_lt end
+      ai = ai + 1
+    end
+    return max_lt
   end
-  # Literals and local computations are frame-lifetime
+  # Binop/unary: result lifetime is max of operand lifetimes
+  if tag == :binop do
+    la = expr_lifetime(pool, ch, attrs, node.a)
+    lb = expr_lifetime(pool, ch, attrs, node.b)
+    if la > lb do return la end
+    return lb
+  end
+  if tag == :unary do
+    return expr_lifetime(pool, ch, attrs, node.a)
+  end
+  # Literals are compile-time constants — no arena dependency, assignable anywhere
+  if tag == :int_lit   do return 3 end
+  if tag == :float_lit do return 3 end
+  if tag == :bool_lit  do return 3 end
+  if tag == :atom_lit  do return 3 end
+  if tag == :string_lit do return 3 end
+  if tag == :method_call do
+    # Result lifetime is max of receiver and all argument lifetimes
+    max_lt = expr_lifetime(pool, ch, attrs, node.a)
+    cs = node.b
+    cl = node.c
+    ai = 0
+    while ai < cl do
+      arg_lt = expr_lifetime(pool, ch, attrs, ch.get(cs + ai))
+      if arg_lt > max_lt do max_lt = arg_lt end
+      ai = ai + 1
+    end
+    return max_lt
+  end
+  # Locals and everything else are frame-lifetime
   return 1
 end
 
@@ -229,8 +268,61 @@ defp builtin_ret(name :: string) :: int do
   if name == "time_now"        do return 2 end
   if name == "rand"            do return 2 end
   if name == "rand_range"      do return 2 end
+  if name == "abs"             do return 2 end
+  if name == "sqrt"            do return 2 end
+  if name == "sin"             do return 2 end
+  if name == "cos"             do return 2 end
+  if name == "tan"             do return 2 end
+  if name == "atan2"           do return 2 end
+  if name == "floor"           do return 2 end
+  if name == "ceil"            do return 2 end
+  if name == "round"           do return 2 end
+  if name == "min"             do return 2 end
+  if name == "max"             do return 2 end
+  if name == "clamp"           do return 2 end
+  if name == "lerp"            do return 2 end
+  if name == "scale"           do return 2 end
+  if name == "deg_to_rad"      do return 2 end
+  if name == "rad_to_deg"      do return 2 end
+  if name == "sign"            do return 2 end
+  if name == "fract"           do return 2 end
+  if name == "wrap"            do return 2 end
+  if name == "snap"            do return 2 end
+  if name == "pow"             do return 2 end
+  if name == "smooth_step"     do return 2 end
+  if name == "smoother_step"   do return 2 end
+  if name == "ping_pong"       do return 2 end
+  if name == "move_toward"     do return 2 end
+  if name == "angle_diff"      do return 2 end
+  if name == "to_float"        do return 2 end
+  if name == "vec2_len"        do return 2 end
+  if name == "vec2_dot"        do return 2 end
+  if name == "vec2_dist"       do return 2 end
+  if name == "vec2_angle"      do return 2 end
+  if name == "vec2_cross"      do return 2 end
+  if name == "vec2_norm_x"     do return 2 end
+  if name == "vec2_norm_y"     do return 2 end
+  # int-returning (type conversions + color)
+  if name == "to_int"          do return 1 end
+  if name == "rgb"             do return 1 end
+  if name == "rgba"            do return 1 end
+  if name == "color_r"         do return 1 end
+  if name == "color_g"         do return 1 end
+  if name == "color_b"         do return 1 end
+  if name == "color_a"         do return 1 end
+  if name == "color_lerp"      do return 1 end
+  if name == "color_mix"       do return 1 end
+  if name == "bit_and"         do return 1 end
+  if name == "bit_or"          do return 1 end
+  if name == "bit_xor"         do return 1 end
+  if name == "bit_not"         do return 1 end
+  if name == "bit_shl"         do return 1 end
+  if name == "bit_shr"         do return 1 end
+  # bool-returning (type conversion)
+  if name == "to_bool"         do return 3 end
   # array-returning
   if name == "array_new"       do return 7 end
+  if name == "array_fixed"     do return 7 end
   # promotion functions — passthrough; we return 1 to suppress E005 (type is arg-dependent)
   if name == "copy_to_script"  do return 1 end
   if name == "persist_copy"    do return 1 end

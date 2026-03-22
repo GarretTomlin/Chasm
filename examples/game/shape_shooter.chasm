@@ -1,503 +1,353 @@
-# shape_shooter.chasm — Shape Shooter: exercises new raylib-extended-bindings
-# Run: chasm run --engine raylib examples/shape_shooter/shape_shooter.chasm
+# shape_shooter.chasm — Shape Shooter: arena-backed arrays for bullets + enemies
+# Run: chasm run --engine raylib examples/game/shape_shooter.chasm
 #
 # Controls:
 #   WASD / Arrow keys  — move player
 #   SPACE              — shoot
 #   Gamepad left stick — move (if connected)
 #   Gamepad A (btn 0)  — shoot
-#
-# New bindings exercised:
-#   draw_triangle, draw_poly, draw_ring, draw_ellipse
-#   camera2d_begin, camera2d_end, world_to_screen_x, world_to_screen_y
-#   gamepad_available, gamepad_axis, gamepad_button_pressed
-#   window_focused, window_resized
 
 # ---- World constants --------------------------------------------------------
-@W :: script = 800.0
-@H :: script = 600.0
+@world_width  :: script = 800.0
+@world_height :: script = 600.0
 
 # ---- Player state -----------------------------------------------------------
-@px     :: script = 400.0   # position
-@py     :: script = 300.0
-@pangle :: script = 0.0     # facing angle (degrees)
-@pspeed :: script = 180.0
+@player_x     :: script = 400.0
+@player_y     :: script = 300.0
+@player_angle :: script = 0.0
+@player_speed :: script = 180.0
 
 # ---- Camera -----------------------------------------------------------------
-@cam_x  :: script = 400.0   # camera offset (screen center)
-@cam_y  :: script = 300.0
+@camera_x :: script = 400.0
+@camera_y :: script = 300.0
 
-# ---- Bullets (4 slots, each independently active) ---------------------------
-# active flag: 0 = free, 1 = in flight
-@bx0    :: script = 0.0
-@by0    :: script = 0.0
-@bvx0   :: script = 0.0
-@bvy0   :: script = 0.0
-@ba0    :: script = 0      # active
+# ---- Bullets — 4 slots, arena-backed fixed arrays ---------------------------
+# Each array holds one field per bullet slot (x, y, vel_x, vel_y, active)
+@bullet_x      :: script = array_fixed(4)
+@bullet_y      :: script = array_fixed(4)
+@bullet_vel_x  :: script = array_fixed(4)
+@bullet_vel_y  :: script = array_fixed(4)
+@bullet_active :: script = array_fixed(4)
 
-@bx1    :: script = 0.0
-@by1    :: script = 0.0
-@bvx1   :: script = 0.0
-@bvy1   :: script = 0.0
-@ba1    :: script = 0
-
-@bx2    :: script = 0.0
-@by2    :: script = 0.0
-@bvx2   :: script = 0.0
-@bvy2   :: script = 0.0
-@ba2    :: script = 0
-
-@bx3    :: script = 0.0
-@by3    :: script = 0.0
-@bvx3   :: script = 0.0
-@bvy3   :: script = 0.0
-@ba3    :: script = 0
-
-# ---- Enemies (up to 8) ------------------------------------------------------
-@ex0 :: script = 100.0
-@ey0 :: script = 100.0
-@ex1 :: script = 700.0
-@ey1 :: script = 100.0
-@ex2 :: script = 100.0
-@ey2 :: script = 500.0
-@ex3 :: script = 700.0
-@ey3 :: script = 500.0
-@ex4 :: script = 400.0
-@ey4 :: script = 80.0
-@ex5 :: script = 400.0
-@ey5 :: script = 520.0
-@ex6 :: script = 80.0
-@ey6 :: script = 300.0
-@ex7 :: script = 720.0
-@ey7 :: script = 300.0
-@enemy_alive0 :: script = 1
-@enemy_alive1 :: script = 1
-@enemy_alive2 :: script = 1
-@enemy_alive3 :: script = 1
-@enemy_alive4 :: script = 1
-@enemy_alive5 :: script = 1
-@enemy_alive6 :: script = 1
-@enemy_alive7 :: script = 1
+# ---- Enemies — 8 slots, arena-backed fixed arrays ---------------------------
+@enemy_x     :: script = array_fixed(8)
+@enemy_y     :: script = array_fixed(8)
+@enemy_alive :: script = array_fixed(8)
 
 # ---- Score / game state -----------------------------------------------------
 @score      :: script     = 0
 @high_score :: persistent = 0
-@shoot_cd   :: script     = 0.0   # shoot cooldown
+@shoot_cooldown :: script = 0.0
 @game_over  :: script     = 0
 @win        :: script     = 0
 @time_alive :: script     = 0.0
 
-# ---- Helpers ----------------------------------------------------------------
+# ---- Module init: seed bullet and enemy arrays ------------------------------
 
-defp angle_to_dx(a :: float) :: float do
-  return cos(deg_to_rad(a))
+def on_init() do
+  # Seed bullet slots (all inactive)
+  slot = 0
+  while slot < 4 do
+    @bullet_x.push(0)
+    @bullet_y.push(0)
+    @bullet_vel_x.push(0)
+    @bullet_vel_y.push(0)
+    @bullet_active.push(0)
+    slot = slot + 1
+  end
+  # Seed enemy spawn positions (8 enemies around the arena)
+  @enemy_x.push(100)
+  @enemy_y.push(100)
+  @enemy_x.push(700)
+  @enemy_y.push(100)
+  @enemy_x.push(100)
+  @enemy_y.push(500)
+  @enemy_x.push(700)
+  @enemy_y.push(500)
+  @enemy_x.push(400)
+  @enemy_y.push(80)
+  @enemy_x.push(400)
+  @enemy_y.push(520)
+  @enemy_x.push(80)
+  @enemy_y.push(300)
+  @enemy_x.push(720)
+  @enemy_y.push(300)
+  slot = 0
+  while slot < 8 do
+    @enemy_alive.push(1)
+    slot = slot + 1
+  end
 end
 
-defp angle_to_dy(a :: float) :: float do
-  return sin(deg_to_rad(a))
+# ---- Math helpers -----------------------------------------------------------
+
+defp dir_x(angle :: float) :: float do
+  return cos(deg_to_rad(angle))
 end
 
-defp dist(ax :: float, ay :: float, bx :: float, by :: float) :: float do
-  dx :: frame = ax - bx
-  dy :: frame = ay - by
-  return sqrt(dx * dx + dy * dy)
+defp dir_y(angle :: float) :: float do
+  return sin(deg_to_rad(angle))
 end
 
-defp enemies_left() :: int do
-  total :: frame = @enemy_alive0 + @enemy_alive1 + @enemy_alive2 + @enemy_alive3
-  total = total + @enemy_alive4 + @enemy_alive5 + @enemy_alive6 + @enemy_alive7
-  return total
+defp distance(ax :: float, ay :: float, bx :: float, by :: float) :: float do
+  delta_x :: frame = ax - bx
+  delta_y :: frame = ay - by
+  return sqrt(delta_x * delta_x + delta_y * delta_y)
 end
 
-# ---- Bullet helpers ---------------------------------------------------------
+defp enemies_remaining() :: int do
+  count :: frame = 0
+  i = 0
+  while i < 8 do
+    count = count + @enemy_alive.get(i)
+    i = i + 1
+  end
+  return count
+end
+
+# ---- Bullet logic -----------------------------------------------------------
 
 defp spawn_bullet(angle :: float) do
-  spd :: frame = 420.0
-  dx  :: frame = angle_to_dx(angle)
-  dy  :: frame = angle_to_dy(angle)
-  if @ba0 == 0 do
-    @bx0 = @px
-    @by0 = @py
-    @bvx0 = dx * spd
-    @bvy0 = dy * spd
-    @ba0 = 1
-    return
-  end
-  if @ba1 == 0 do
-    @bx1 = @px
-    @by1 = @py
-    @bvx1 = dx * spd
-    @bvy1 = dy * spd
-    @ba1 = 1
-    return
-  end
-  if @ba2 == 0 do
-    @bx2 = @px
-    @by2 = @py
-    @bvx2 = dx * spd
-    @bvy2 = dy * spd
-    @ba2 = 1
-    return
-  end
-  if @ba3 == 0 do
-    @bx3 = @px
-    @by3 = @py
-    @bvx3 = dx * spd
-    @bvy3 = dy * spd
-    @ba3 = 1
+  speed    :: frame = 420.0
+  dir_x_v  :: frame = dir_x(angle)
+  dir_y_v  :: frame = dir_y(angle)
+  slot = 0
+  while slot < 4 do
+    if @bullet_active.get(slot) == 0 do
+      @bullet_x.set(slot, to_int(@player_x))
+      @bullet_y.set(slot, to_int(@player_y))
+      @bullet_vel_x.set(slot, to_int(dir_x_v * speed))
+      @bullet_vel_y.set(slot, to_int(dir_y_v * speed))
+      @bullet_active.set(slot, 1)
+      return
+    end
+    slot = slot + 1
   end
 end
 
 defp move_bullets(dt :: float) do
-  if @ba0 == 1 do
-    @bx0 = @bx0 + @bvx0 * dt
-    @by0 = @by0 + @bvy0 * dt
-    if @bx0 < 0.0 or @bx0 > @W or @by0 < 0.0 or @by0 > @H do
-      @ba0 = 0
+  slot = 0
+  while slot < 4 do
+    if @bullet_active.get(slot) == 1 do
+      new_x :: frame = to_float(@bullet_x.get(slot)) + to_float(@bullet_vel_x.get(slot)) * dt
+      new_y :: frame = to_float(@bullet_y.get(slot)) + to_float(@bullet_vel_y.get(slot)) * dt
+      @bullet_x.set(slot, to_int(new_x))
+      @bullet_y.set(slot, to_int(new_y))
+      if new_x < 0.0 or new_x > @world_width or new_y < 0.0 or new_y > @world_height do
+        @bullet_active.set(slot, 0)
+      end
     end
-  end
-  if @ba1 == 1 do
-    @bx1 = @bx1 + @bvx1 * dt
-    @by1 = @by1 + @bvy1 * dt
-    if @bx1 < 0.0 or @bx1 > @W or @by1 < 0.0 or @by1 > @H do
-      @ba1 = 0
-    end
-  end
-  if @ba2 == 1 do
-    @bx2 = @bx2 + @bvx2 * dt
-    @by2 = @by2 + @bvy2 * dt
-    if @bx2 < 0.0 or @bx2 > @W or @by2 < 0.0 or @by2 > @H do
-      @ba2 = 0
-    end
-  end
-  if @ba3 == 1 do
-    @bx3 = @bx3 + @bvx3 * dt
-    @by3 = @by3 + @bvy3 * dt
-    if @bx3 < 0.0 or @bx3 > @W or @by3 < 0.0 or @by3 > @H do
-      @ba3 = 0
-    end
+    slot = slot + 1
   end
 end
 
-# Check if bullet (bx,by) hits enemy (ex,ey); kill enemy if so, return new alive
-defp check_hit(bx :: float, by :: float, ex :: float, ey :: float, alive :: int) :: int do
-  if alive == 0 do
-    return 0
+# ---- Enemy logic ------------------------------------------------------------
+
+defp move_enemies(dt :: float) do
+  i = 0
+  while i < 8 do
+    if @enemy_alive.get(i) == 1 do
+      ex    :: frame = to_float(@enemy_x.get(i))
+      ey    :: frame = to_float(@enemy_y.get(i))
+      dx    :: frame = @player_x - ex
+      dy    :: frame = @player_y - ey
+      dist  :: frame = sqrt(dx * dx + dy * dy)
+      if dist > 1.0 do
+        @enemy_x.set(i, to_int(ex + (dx / dist) * 60.0 * dt))
+        @enemy_y.set(i, to_int(ey + (dy / dist) * 60.0 * dt))
+      end
+    end
+    i = i + 1
   end
-  if dist(bx, by, ex, ey) < 22.0 do
-    @score = @score + 100
-    return 0
-  end
-  return alive
 end
 
-# ---- Enemy movement ---------------------------------------------------------
+# ---- Collision detection ----------------------------------------------------
 
-defp move_enemy(ex :: float, ey :: float) :: float do
-  dx :: frame = @px - ex
-  dy :: frame = @py - ey
-  d  :: frame = sqrt(dx * dx + dy * dy)
-  if d < 1.0 do
-    return ex
+defp check_bullet_enemy_hits() do
+  bullet = 0
+  while bullet < 4 do
+    if @bullet_active.get(bullet) == 1 do
+      bx :: frame = to_float(@bullet_x.get(bullet))
+      by :: frame = to_float(@bullet_y.get(bullet))
+      enemy = 0
+      while enemy < 8 do
+        if @enemy_alive.get(enemy) == 1 do
+          ex :: frame = to_float(@enemy_x.get(enemy))
+          ey :: frame = to_float(@enemy_y.get(enemy))
+          if distance(bx, by, ex, ey) < 22.0 do
+            @enemy_alive.set(enemy, 0)
+            @bullet_active.set(bullet, 0)
+            @score = @score + 100
+          end
+        end
+        enemy = enemy + 1
+      end
+    end
+    bullet = bullet + 1
   end
-  return ex + (dx / d) * 60.0 * 0.016
 end
 
-defp move_enemy_y(ex :: float, ey :: float) :: float do
-  dx :: frame = @px - ex
-  dy :: frame = @py - ey
-  d  :: frame = sqrt(dx * dx + dy * dy)
-  if d < 1.0 do
-    return ey
+defp check_player_enemy_hits() do
+  i = 0
+  while i < 8 do
+    if @enemy_alive.get(i) == 1 do
+      ex :: frame = to_float(@enemy_x.get(i))
+      ey :: frame = to_float(@enemy_y.get(i))
+      if distance(@player_x, @player_y, ex, ey) < 20.0 do
+        @game_over = 1
+      end
+    end
+    i = i + 1
   end
-  return ey + (dy / d) * 60.0 * 0.016
+end
+
+# ---- Reset ------------------------------------------------------------------
+
+defp reset_game() do
+  @player_x = 400.0
+  @player_y = 300.0
+  @player_angle = 0.0
+  @score = 0
+  @game_over = 0
+  @win = 0
+  @time_alive = 0.0
+  @shoot_cooldown = 0.0
+  slot = 0
+  while slot < 4 do
+    @bullet_active.set(slot, 0)
+    slot = slot + 1
+  end
+  @enemy_x.set(0, 100)
+  @enemy_y.set(0, 100)
+  @enemy_x.set(1, 700)
+  @enemy_y.set(1, 100)
+  @enemy_x.set(2, 100)
+  @enemy_y.set(2, 500)
+  @enemy_x.set(3, 700)
+  @enemy_y.set(3, 500)
+  @enemy_x.set(4, 400)
+  @enemy_y.set(4, 80)
+  @enemy_x.set(5, 400)
+  @enemy_y.set(5, 520)
+  @enemy_x.set(6, 80)
+  @enemy_y.set(6, 300)
+  @enemy_x.set(7, 720)
+  @enemy_y.set(7, 300)
+  i = 0
+  while i < 8 do
+    @enemy_alive.set(i, 1)
+    i = i + 1
+  end
 end
 
 # ---- on_tick ----------------------------------------------------------------
 
 def on_tick(dt :: float) do
   if @game_over == 1 or @win == 1 do
-    if key_pressed(257) do   # ENTER — restart
-      @px = 400.0
-      @py = 300.0
-      @pangle = 0.0
-      @score = 0
-      @game_over = 0
-      @win = 0
-      @time_alive = 0.0
-      @shoot_cd = 0.0
-      @ba0 = 0
-      @ba1 = 0
-      @ba2 = 0
-      @ba3 = 0
-      @enemy_alive0 = 1
-      @enemy_alive1 = 1
-      @enemy_alive2 = 1
-      @enemy_alive3 = 1
-      @enemy_alive4 = 1
-      @enemy_alive5 = 1
-      @enemy_alive6 = 1
-      @enemy_alive7 = 1
-      @ex0 = 100.0
-      @ey0 = 100.0
-      @ex1 = 700.0
-      @ey1 = 100.0
-      @ex2 = 100.0
-      @ey2 = 500.0
-      @ex3 = 700.0
-      @ey3 = 500.0
-      @ex4 = 400.0
-      @ey4 = 80.0
-      @ex5 = 400.0
-      @ey5 = 520.0
-      @ex6 = 80.0
-      @ey6 = 300.0
-      @ex7 = 720.0
-      @ey7 = 300.0
+    if key_pressed(257) do
+      reset_game()
     end
     return
   end
 
   @time_alive = @time_alive + dt
 
-  # ---- Player movement -------------------------------------------------------
-  move_x :: frame = 0.0
-  move_y :: frame = 0.0
+  # Player movement input
+  input_x :: frame = 0.0
+  input_y :: frame = 0.0
+  if key_down(65) or key_down(263) do input_x = input_x - 1.0 end
+  if key_down(68) or key_down(262) do input_x = input_x + 1.0 end
+  if key_down(87) or key_down(265) do input_y = input_y - 1.0 end
+  if key_down(83) or key_down(264) do input_y = input_y + 1.0 end
 
-  if key_down(65) or key_down(263) do   # A / LEFT
-    move_x = move_x - 1.0
-  end
-  if key_down(68) or key_down(262) do   # D / RIGHT
-    move_x = move_x + 1.0
-  end
-  if key_down(87) or key_down(265) do   # W / UP
-    move_y = move_y - 1.0
-  end
-  if key_down(83) or key_down(264) do   # S / DOWN
-    move_y = move_y + 1.0
-  end
-
-  # Gamepad support
   if gamepad_available(0) do
-    gx :: frame = gamepad_axis(0, 0)
-    gy :: frame = gamepad_axis(0, 1)
-    if gx > 0.15 or gx < 0.0 - 0.15 do
-      move_x = move_x + gx
-    end
-    if gy > 0.15 or gy < 0.0 - 0.15 do
-      move_y = move_y + gy
-    end
+    axis_x :: frame = gamepad_axis(0, 0)
+    axis_y :: frame = gamepad_axis(0, 1)
+    if axis_x > 0.15 or axis_x < 0.0 - 0.15 do input_x = input_x + axis_x end
+    if axis_y > 0.15 or axis_y < 0.0 - 0.15 do input_y = input_y + axis_y end
   end
 
   # Normalize diagonal movement
-  if move_x != 0.0 and move_y != 0.0 do
-    move_x = move_x * 0.7071
-    move_y = move_y * 0.7071
+  if input_x != 0.0 and input_y != 0.0 do
+    input_x = input_x * 0.7071
+    input_y = input_y * 0.7071
   end
 
-  @px = @px + move_x * @pspeed * dt
-  @py = @py + move_y * @pspeed * dt
+  @player_x = copy_to_script(clamp(@player_x + input_x * @player_speed * dt, 16.0, @world_width - 16.0))
+  @player_y = copy_to_script(clamp(@player_y + input_y * @player_speed * dt, 16.0, @world_height - 16.0))
 
-  # Clamp to world bounds
-  @px = clamp(@px, 16.0, @W - 16.0)
-  @py = clamp(@py, 16.0, @H - 16.0)
-
-  # Update facing angle from movement
-  if move_x != 0.0 or move_y != 0.0 do
-    @pangle = rad_to_deg(atan2(move_y, move_x))
+  if input_x != 0.0 or input_y != 0.0 do
+    @player_angle = copy_to_script(rad_to_deg(atan2(input_y, input_x)))
   end
 
-  # ---- Shooting --------------------------------------------------------------
-  @shoot_cd = @shoot_cd - dt
-  can_shoot :: frame = 0
-  if key_pressed(32) do
-    can_shoot = 1
-  end
+  # Shooting
+  @shoot_cooldown = @shoot_cooldown - dt
+  wants_to_shoot :: frame = 0
+  if key_pressed(32) do wants_to_shoot = 1 end
   if gamepad_available(0) do
-    if gamepad_button_pressed(0, 0) do
-      can_shoot = 1
-    end
+    if gamepad_button_pressed(0, 0) do wants_to_shoot = 1 end
   end
-  if can_shoot == 1 and @shoot_cd <= 0.0 do
-    spawn_bullet(@pangle)
-    @shoot_cd = 0.25
+  if wants_to_shoot == 1 and @shoot_cooldown <= 0.0 do
+    spawn_bullet(@player_angle)
+    @shoot_cooldown = 0.25
   end
 
-  # ---- Move bullets ----------------------------------------------------------
   move_bullets(dt)
+  move_enemies(dt)
+  check_bullet_enemy_hits()
+  check_player_enemy_hits()
 
-  # ---- Move enemies ----------------------------------------------------------
-  if @enemy_alive0 == 1 do
-    @ex0 = move_enemy(@ex0, @ey0)
-    @ey0 = move_enemy_y(@ex0, @ey0)
-  end
-  if @enemy_alive1 == 1 do
-    @ex1 = move_enemy(@ex1, @ey1)
-    @ey1 = move_enemy_y(@ex1, @ey1)
-  end
-  if @enemy_alive2 == 1 do
-    @ex2 = move_enemy(@ex2, @ey2)
-    @ey2 = move_enemy_y(@ex2, @ey2)
-  end
-  if @enemy_alive3 == 1 do
-    @ex3 = move_enemy(@ex3, @ey3)
-    @ey3 = move_enemy_y(@ex3, @ey3)
-  end
-  if @enemy_alive4 == 1 do
-    @ex4 = move_enemy(@ex4, @ey4)
-    @ey4 = move_enemy_y(@ex4, @ey4)
-  end
-  if @enemy_alive5 == 1 do
-    @ex5 = move_enemy(@ex5, @ey5)
-    @ey5 = move_enemy_y(@ex5, @ey5)
-  end
-  if @enemy_alive6 == 1 do
-    @ex6 = move_enemy(@ex6, @ey6)
-    @ey6 = move_enemy_y(@ex6, @ey6)
-  end
-  if @enemy_alive7 == 1 do
-    @ex7 = move_enemy(@ex7, @ey7)
-    @ey7 = move_enemy_y(@ex7, @ey7)
-  end
-
-  # ---- Bullet vs enemy collisions --------------------------------------------
-  if @ba0 == 1 do
-    @enemy_alive0 = check_hit(@bx0, @by0, @ex0, @ey0, @enemy_alive0)
-    @enemy_alive1 = check_hit(@bx0, @by0, @ex1, @ey1, @enemy_alive1)
-    @enemy_alive2 = check_hit(@bx0, @by0, @ex2, @ey2, @enemy_alive2)
-    @enemy_alive3 = check_hit(@bx0, @by0, @ex3, @ey3, @enemy_alive3)
-    @enemy_alive4 = check_hit(@bx0, @by0, @ex4, @ey4, @enemy_alive4)
-    @enemy_alive5 = check_hit(@bx0, @by0, @ex5, @ey5, @enemy_alive5)
-    @enemy_alive6 = check_hit(@bx0, @by0, @ex6, @ey6, @enemy_alive6)
-    @enemy_alive7 = check_hit(@bx0, @by0, @ex7, @ey7, @enemy_alive7)
-  end
-  if @ba1 == 1 do
-    @enemy_alive0 = check_hit(@bx1, @by1, @ex0, @ey0, @enemy_alive0)
-    @enemy_alive1 = check_hit(@bx1, @by1, @ex1, @ey1, @enemy_alive1)
-    @enemy_alive2 = check_hit(@bx1, @by1, @ex2, @ey2, @enemy_alive2)
-    @enemy_alive3 = check_hit(@bx1, @by1, @ex3, @ey3, @enemy_alive3)
-    @enemy_alive4 = check_hit(@bx1, @by1, @ex4, @ey4, @enemy_alive4)
-    @enemy_alive5 = check_hit(@bx1, @by1, @ex5, @ey5, @enemy_alive5)
-    @enemy_alive6 = check_hit(@bx1, @by1, @ex6, @ey6, @enemy_alive6)
-    @enemy_alive7 = check_hit(@bx1, @by1, @ex7, @ey7, @enemy_alive7)
-  end
-  if @ba2 == 1 do
-    @enemy_alive0 = check_hit(@bx2, @by2, @ex0, @ey0, @enemy_alive0)
-    @enemy_alive1 = check_hit(@bx2, @by2, @ex1, @ey1, @enemy_alive1)
-    @enemy_alive2 = check_hit(@bx2, @by2, @ex2, @ey2, @enemy_alive2)
-    @enemy_alive3 = check_hit(@bx2, @by2, @ex3, @ey3, @enemy_alive3)
-    @enemy_alive4 = check_hit(@bx2, @by2, @ex4, @ey4, @enemy_alive4)
-    @enemy_alive5 = check_hit(@bx2, @by2, @ex5, @ey5, @enemy_alive5)
-    @enemy_alive6 = check_hit(@bx2, @by2, @ex6, @ey6, @enemy_alive6)
-    @enemy_alive7 = check_hit(@bx2, @by2, @ex7, @ey7, @enemy_alive7)
-  end
-  if @ba3 == 1 do
-    @enemy_alive0 = check_hit(@bx3, @by3, @ex0, @ey0, @enemy_alive0)
-    @enemy_alive1 = check_hit(@bx3, @by3, @ex1, @ey1, @enemy_alive1)
-    @enemy_alive2 = check_hit(@bx3, @by3, @ex2, @ey2, @enemy_alive2)
-    @enemy_alive3 = check_hit(@bx3, @by3, @ex3, @ey3, @enemy_alive3)
-    @enemy_alive4 = check_hit(@bx3, @by3, @ex4, @ey4, @enemy_alive4)
-    @enemy_alive5 = check_hit(@bx3, @by3, @ex5, @ey5, @enemy_alive5)
-    @enemy_alive6 = check_hit(@bx3, @by3, @ex6, @ey6, @enemy_alive6)
-    @enemy_alive7 = check_hit(@bx3, @by3, @ex7, @ey7, @enemy_alive7)
-  end
-
-  # ---- Player vs enemy collisions (game over) --------------------------------
-  if @enemy_alive0 == 1 and dist(@px, @py, @ex0, @ey0) < 20.0 do
-    @game_over = 1
-  end
-  if @enemy_alive1 == 1 and dist(@px, @py, @ex1, @ey1) < 20.0 do
-    @game_over = 1
-  end
-  if @enemy_alive2 == 1 and dist(@px, @py, @ex2, @ey2) < 20.0 do
-    @game_over = 1
-  end
-  if @enemy_alive3 == 1 and dist(@px, @py, @ex3, @ey3) < 20.0 do
-    @game_over = 1
-  end
-  if @enemy_alive4 == 1 and dist(@px, @py, @ex4, @ey4) < 20.0 do
-    @game_over = 1
-  end
-  if @enemy_alive5 == 1 and dist(@px, @py, @ex5, @ey5) < 20.0 do
-    @game_over = 1
-  end
-  if @enemy_alive6 == 1 and dist(@px, @py, @ex6, @ey6) < 20.0 do
-    @game_over = 1
-  end
-  if @enemy_alive7 == 1 and dist(@px, @py, @ex7, @ey7) < 20.0 do
-    @game_over = 1
-  end
-
-  # ---- Win condition ---------------------------------------------------------
-  if enemies_left() == 0 do
+  if enemies_remaining() == 0 do
     @win = 1
     if @score > @high_score do
-      @high_score = @score
+      @high_score = persist_copy(@score)
     end
   end
 
-  # ---- Smooth camera follow --------------------------------------------------
-  @cam_x = @cam_x + (@px - @cam_x) * 5.0 * dt
-  @cam_y = @cam_y + (@py - @cam_y) * 5.0 * dt
+  # Smooth camera follow
+  @camera_x = @camera_x + (@player_x - @camera_x) * 5.0 * dt
+  @camera_y = @camera_y + (@player_y - @camera_y) * 5.0 * dt
 end
 
 # ---- Drawing helpers --------------------------------------------------------
 
 defp draw_player(x :: float, y :: float, angle :: float, focused :: bool) do
-  # Body: pentagon (5-sided polygon)
-  col :: frame = 0x44aaFFFF
-  if not focused do
-    col = 0x446688FF
-  end
-  draw_poly(x, y, 5, 14.0, angle, col)
-  draw_poly(x, y, 5, 14.0, angle, 0x88ccFFAA)
-
-  # Nose: triangle pointing in facing direction
-  dx :: frame = angle_to_dx(angle)
-  dy :: frame = angle_to_dy(angle)
-  nx :: frame = x + dx * 18.0
-  ny :: frame = y + dy * 18.0
-  lx :: frame = x + angle_to_dx(angle + 120.0) * 10.0
-  ly :: frame = y + angle_to_dy(angle + 120.0) * 10.0
-  rx :: frame = x + angle_to_dx(angle - 120.0) * 10.0
-  ry :: frame = y + angle_to_dy(angle - 120.0) * 10.0
-  draw_triangle(nx, ny, lx, ly, rx, ry, 0xFFFFFFFF)
-
-  # Engine glow ring
+  color :: frame = 0x44aaFFFF
+  if not focused do color = 0x446688FF end
+  draw_poly(x, y, 5, 14.0, angle, color)
+  forward_x :: frame = dir_x(angle)
+  forward_y :: frame = dir_y(angle)
+  nose_x    :: frame = x + forward_x * 18.0
+  nose_y    :: frame = y + forward_y * 18.0
+  left_x    :: frame = x + dir_x(angle + 120.0) * 10.0
+  left_y    :: frame = y + dir_y(angle + 120.0) * 10.0
+  right_x   :: frame = x + dir_x(angle - 120.0) * 10.0
+  right_y   :: frame = y + dir_y(angle - 120.0) * 10.0
+  draw_triangle(nose_x, nose_y, left_x, left_y, right_x, right_y, 0xFFFFFFFF)
   draw_ring(x, y, 15.0, 18.0, 0.0, 360.0, 16, 0x2244FFAA)
 end
 
-defp draw_enemy(x :: float, y :: float, t :: float) do
-  # Pulsing ring enemy
-  pulse :: frame = sin(t * 3.0) * 3.0
+defp draw_enemy(x :: float, y :: float, time :: float) do
+  pulse :: frame = sin(time * 3.0) * 3.0
   draw_ring(x, y, 10.0 + pulse, 18.0 + pulse, 0.0, 360.0, 12, 0xFF4422CC)
   draw_ellipse(x, y, 10.0, 8.0, 0xFF6644FF)
   draw_triangle_lines(x, y - 16.0, x - 14.0, y + 10.0, x + 14.0, y + 10.0, 0xFF2200FF)
 end
 
-defp draw_bullet(x :: float, y :: float) do
-  draw_ellipse(x, y, 5.0, 3.0, 0xFFFF44FF)
-  draw_circle(x, y, 3.0, 0xFFFFAAFF)
-end
-
 defp draw_arena() do
-  # Border
-  draw_rect_lines(0.0, 0.0, @W, @H, 0x334455FF)
-  # Grid lines (horizontal)
-  draw_line(0.0, 150.0, @W, 150.0, 0x1a2233FF)
-  draw_line(0.0, 300.0, @W, 300.0, 0x1a2233FF)
-  draw_line(0.0, 450.0, @W, 450.0, 0x1a2233FF)
-  # Grid lines (vertical)
-  draw_line(200.0, 0.0, 200.0, @H, 0x1a2233FF)
-  draw_line(400.0, 0.0, 400.0, @H, 0x1a2233FF)
-  draw_line(600.0, 0.0, 600.0, @H, 0x1a2233FF)
+  draw_rect_lines(0.0, 0.0, @world_width, @world_height, 0x334455FF)
+  draw_line(0.0, 150.0, @world_width, 150.0, 0x1a2233FF)
+  draw_line(0.0, 300.0, @world_width, 300.0, 0x1a2233FF)
+  draw_line(0.0, 450.0, @world_width, 450.0, 0x1a2233FF)
+  draw_line(200.0, 0.0, 200.0, @world_height, 0x1a2233FF)
+  draw_line(400.0, 0.0, 400.0, @world_height, 0x1a2233FF)
+  draw_line(600.0, 0.0, 600.0, @world_height, 0x1a2233FF)
 end
 
 # ---- on_draw ----------------------------------------------------------------
 
 def on_draw() do
   clear(0x0d1117FF)
-
   focused :: frame = window_focused()
 
   if @game_over == 1 do
@@ -514,61 +364,37 @@ def on_draw() do
     return
   end
 
-  # Camera 2D — follow player with slight offset
-  camera2d_begin(@cam_x, @cam_y, @px, @py, 0.0, 1.0)
-
+  camera2d_begin(@camera_x, @camera_y, @player_x, @player_y, 0.0, 1.0)
   draw_arena()
 
-  # Enemies
-  if @enemy_alive0 == 1 do
-    draw_enemy(@ex0, @ey0, @time_alive)
-  end
-  if @enemy_alive1 == 1 do
-    draw_enemy(@ex1, @ey1, @time_alive)
-  end
-  if @enemy_alive2 == 1 do
-    draw_enemy(@ex2, @ey2, @time_alive)
-  end
-  if @enemy_alive3 == 1 do
-    draw_enemy(@ex3, @ey3, @time_alive)
-  end
-  if @enemy_alive4 == 1 do
-    draw_enemy(@ex4, @ey4, @time_alive)
-  end
-  if @enemy_alive5 == 1 do
-    draw_enemy(@ex5, @ey5, @time_alive)
-  end
-  if @enemy_alive6 == 1 do
-    draw_enemy(@ex6, @ey6, @time_alive)
-  end
-  if @enemy_alive7 == 1 do
-    draw_enemy(@ex7, @ey7, @time_alive)
+  # Draw enemies
+  i = 0
+  while i < 8 do
+    if @enemy_alive.get(i) == 1 do
+      draw_enemy(to_float(@enemy_x.get(i)), to_float(@enemy_y.get(i)), @time_alive)
+    end
+    i = i + 1
   end
 
-  # Bullets
-  if @ba0 == 1 do
-    draw_bullet(@bx0, @by0)
-  end
-  if @ba1 == 1 do
-    draw_bullet(@bx1, @by1)
-  end
-  if @ba2 == 1 do
-    draw_bullet(@bx2, @by2)
-  end
-  if @ba3 == 1 do
-    draw_bullet(@bx3, @by3)
+  # Draw bullets
+  slot = 0
+  while slot < 4 do
+    if @bullet_active.get(slot) == 1 do
+      bx :: frame = to_float(@bullet_x.get(slot))
+      by :: frame = to_float(@bullet_y.get(slot))
+      draw_ellipse(bx, by, 5.0, 3.0, 0xFFFF44FF)
+      draw_circle(bx, by, 3.0, 0xFFFFAAFF)
+    end
+    slot = slot + 1
   end
 
-  # Player
-  draw_player(@px, @py, @pangle, focused)
-
+  draw_player(@player_x, @player_y, @player_angle, focused)
   camera2d_end()
 
-  # HUD (drawn in screen space, outside camera)
   draw_text("SHAPE SHOOTER", 12.0, 12.0, 22, 0x44AAFFFF)
   draw_text("Score: #{@score}", 12.0, 40.0, 18, 0xFFFFFFFF)
   draw_text("Best:  #{@high_score}", 12.0, 62.0, 16, 0xFFAA44FF)
-  draw_text("Enemies: #{enemies_left()}", 12.0, 84.0, 16, 0xFF6644FF)
+  draw_text("Enemies: #{enemies_remaining()}", 12.0, 84.0, 16, 0xFF6644FF)
   draw_text("WASD/Arrows: move  SPACE: shoot", 12.0, 576.0, 14, 0x556677FF)
   draw_fps(720.0, 12.0)
 

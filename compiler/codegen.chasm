@@ -247,11 +247,19 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
     if recv_node.tag == :ident do
       elem_tid = ve_lookup(var_elems, ve_len, recv_node.name)
     end
+    if recv_node.tag == :at_ref do
+      at_bare = str_slice(recv_node.name, 1, str_len(recv_node.name))
+      elem_tid = ve_lookup(var_elems, ve_len, at_bare)
+    end
     esuf = array_elem_suffix(structs, elem_tid)
 
     if mn == "push" do
       arg_idx = ch.get(cs)
       ac = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arg_idx)
+      # Fixed arrays use push_fixed (no arena, aborts on overflow)
+      if elem_tid == -2 do
+        return str_concat("chasm_array_push_fixed(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ac, ")"))))
+      end
       return str_concat("chasm_array_push", str_concat(esuf, str_concat("(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ac, ")"))))))
     end
     if mn == "get" do
@@ -950,7 +958,7 @@ end
 
 defp emit_fn(pool :: []Node, ch :: []int, types :: []int,
              structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
-             fn_idx :: int) do
+             fn_idx :: int, root :: int) do
   fn_node      = pool.get(fn_idx)
   params_start = fn_node.a
   params_count = fn_node.b
@@ -961,6 +969,28 @@ defp emit_fn(pool :: []Node, ch :: []int, types :: []int,
   params_str = ""
   var_elems  :: []VarElem = make_ve_pool(1024)
   ve_len     = 0
+  # Pre-populate fixed @attr arrays so push calls on them use push_fixed
+  root_node = pool.get(root)
+  rcs = root_node.a
+  rcl = root_node.b
+  ri2 = 0
+  while ri2 < rcl do
+    rdecl_idx = ch.get(rcs + ri2)
+    rdecl     = pool.get(rdecl_idx)
+    if rdecl.tag == :at_decl do
+      rinit_t = types.get(rdecl.a)
+      if rinit_t == 7 do
+        rinit_node = pool.get(rdecl.a)
+        if rinit_node.tag == :call do
+          if rinit_node.name == "array_fixed" do
+            rattr_name = str_slice(rdecl.name, 1, str_len(rdecl.name))
+            ve_len = ve_push(var_elems, ve_len, rattr_name, -2)
+          end
+        end
+      end
+    end
+    ri2 = ri2 + 1
+  end
   i = 0
   while i < params_count do
     param_idx  = ch.get(params_start + i)
@@ -1001,6 +1031,53 @@ defp codegen(pool :: []Node, ch :: []int, root :: int,
   root_node = pool.get(root)
   cs = root_node.a
   cl = root_node.b
+  # Check if any @attr is an array — if so emit arena-backed array helpers once.
+  has_array_attr = false
+  i = 0
+  while i < cl do
+    decl_idx = ch.get(cs + i)
+    decl     = pool.get(decl_idx)
+    if decl.tag == :at_decl do
+      init_t = types.get(decl.a)
+      if init_t == 7 do
+        has_array_attr = true
+      end
+    end
+    i = i + 1
+  end
+  if has_array_attr do
+    print("/* Arena-backed array helpers for @attr arrays */")
+    print("/* array_fixed_in: allocates data from arena at fixed capacity — never grows. */")
+    print("static inline ChasmArray chasm_array_fixed_in(ChasmArena *arena, int64_t cap) {")
+    print("    if (cap <= 0) cap = 8;")
+    print("    void *d = chasm_alloc(arena, (size_t)cap * 8, 8);")
+    print("    if (!d) return (ChasmArray){NULL, 0, 0};")
+    print("    return (ChasmArray){d, 0, cap};")
+    print("}")
+    print("/* push_fixed: bounds-checked push — aborts on overflow (no realloc). */")
+    print("static inline void chasm_array_push_fixed(ChasmCtx *ctx, ChasmArray *a, int64_t v) {")
+    print("    (void)ctx;")
+    print("    if (a->len >= a->cap) { fprintf(stderr, \"chasm: array_fixed overflow (cap=%lld)\\n\", (long long)a->cap); abort(); }")
+    print("    ((int64_t*)a->data)[a->len++] = v;")
+    print("}")
+    print("/* array_new_in: arena-backed growable array (bump-copy on growth). */")
+    print("static inline ChasmArray chasm_array_new_in(ChasmArena *arena, int64_t cap) {")
+    print("    if (cap <= 0) cap = 8;")
+    print("    void *d = chasm_alloc(arena, (size_t)cap * 8, 8);")
+    print("    if (!d) return (ChasmArray){NULL, 0, 0};")
+    print("    return (ChasmArray){d, 0, cap};")
+    print("}")
+    print("static inline void chasm_array_push_in(ChasmArena *arena, ChasmArray *a, int64_t v) {")
+    print("    if (a->len >= a->cap) {")
+    print("        int64_t new_cap = a->cap * 2 + 8;")
+    print("        void *nd = chasm_alloc(arena, (size_t)new_cap * 8, 8);")
+    print("        if (nd && a->data) memcpy(nd, a->data, (size_t)a->len * 8);")
+    print("        a->data = nd; a->cap = new_cap;")
+    print("    }")
+    print("    if (a->data) ((int64_t*)a->data)[a->len++] = v;")
+    print("}")
+    print("")
+  end
   # Emit module-level @attr globals
   has_attrs = false
   i = 0
@@ -1030,8 +1107,34 @@ defp codegen(pool :: []Node, ch :: []int, root :: int,
       decl     = pool.get(decl_idx)
       if decl.tag == :at_decl do
         attr_name = str_slice(decl.name, 1, str_len(decl.name))
-        val_c     = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, decl.a)
-        print(str_concat("  g_", str_concat(attr_name, str_concat(" = ", str_concat(val_c, ";")))))
+        init_t    = types.get(decl.a)
+        # For array attrs: use arena-backed allocation keyed to the declared lifetime.
+        # decl.b holds the lifetime: 1=frame, 2=script, 3=persistent (set by parser).
+        if init_t == 7 do
+          # Extract capacity from array_new(cap) or array_fixed(cap) call node
+          init_node = pool.get(decl.a)
+          cap_c = "8"
+          is_fixed = false
+          if init_node.tag == :call do
+            if init_node.name == "array_fixed" do is_fixed = true end
+            if init_node.b > 0 do
+              cap_arg_idx = ch.get(init_node.a)
+              cap_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, cap_arg_idx)
+            end
+          end
+          arena_expr = "&ctx->script"
+          if decl.b == 1 do arena_expr = "&ctx->frame" end
+          if decl.b == 3 do arena_expr = "&ctx->persistent" end
+          if is_fixed do
+            print(str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_fixed_in(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, ");")))))))
+            ve_len = ve_push(var_elems, ve_len, attr_name, -2)
+          else
+            print(str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_new_in(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, ");")))))))
+          end
+        else
+          val_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, decl.a)
+          print(str_concat("  g_", str_concat(attr_name, str_concat(" = ", str_concat(val_c, ";")))))
+        end
       end
       i = i + 1
     end
@@ -1044,7 +1147,7 @@ defp codegen(pool :: []Node, ch :: []int, root :: int,
     decl_idx = ch.get(cs + i)
     decl     = pool.get(decl_idx)
     if decl.tag == :fn_decl do
-      emit_fn(pool, ch, types, structs, fns, fields, decl_idx)
+      emit_fn(pool, ch, types, structs, fns, fields, decl_idx, root)
     end
     i = i + 1
   end
