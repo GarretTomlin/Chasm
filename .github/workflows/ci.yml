@@ -97,11 +97,11 @@ jobs:
 
       - name: E2E — compile hello world (Unix)
         if: runner.os != 'Windows'
-        run: ./chasm-test compile examples/hello/hello.chasm
+        run: ./chasm-test compile examples/hello_world.chasm
 
       - name: E2E — compile hello world (Windows)
         if: runner.os == 'Windows'
-        run: .\chasm-test.exe compile examples\hello\hello.chasm
+        run: .\chasm-test.exe compile examples\hello_world.chasm
 
       # ---- Bootstrap fixpoint (macOS arm64 only — authoritative platform) ---
 

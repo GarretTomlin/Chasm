@@ -102,7 +102,7 @@ go run ./cmd/shazam /usr/local  # installs system-wide
 ### After install
 
 ```bash
-chasm run examples/hello/hello.chasm
+chasm run examples/hello_world.chasm
 chasm run --engine raylib examples/game/example.chasm
 ```
 
