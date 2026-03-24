@@ -158,7 +158,7 @@ msg :: string = "score: #{@score}"
 
 ### Module Attributes
 
-Module attributes (`@name`) are module-level variables declared at file scope. They use the `@` prefix and persist across function calls for the duration of their lifetime. Unlike local variables they are not stack-allocated — the compiler emits them as C `static` globals and initializes them in a `chasm_module_init` function called once before the script runs.
+Module attributes (`@name`) are module-level variables declared at file scope. They use the `@` prefix and persist across function calls for the duration of their lifetime. Unlike local variables they survive between ticks and are initialized once before the script runs.
 
 #### Declaration syntax
 
@@ -220,27 +220,6 @@ You cannot assign a shorter-lived value to a longer-lived attribute without expl
 ```chasm
 @saved :: persistent = persist_copy(computed_value)
 ```
-
-#### Code generation
-
-For each `@attr` declaration the compiler emits:
-
-```c
-static <type> g_<name>;   /* e.g. static double g_speed; */
-```
-
-All initializers are gathered into a single function:
-
-```c
-void chasm_module_init(ChasmCtx *ctx) {
-    g_score      = 0;
-    g_high_score = 0;
-    g_speed      = 400.0;
-    g_bg_color   = 0x181820ff;
-}
-```
-
-The generated harness calls `chasm_module_init` once before `chasm_main`.
 
 #### Common patterns
 
@@ -314,7 +293,7 @@ end
 v :: Vec2 = Vec2 { x: 1.0, y: 2.0 }
 ```
 
-Structs are value types. They compile to C structs with no heap allocation.
+Structs are value types — copied on assignment, no heap allocation.
 
 ### Enums
 
@@ -431,7 +410,7 @@ Arrays come in two flavors depending on where they live.
 
 ### `array_new(N)` — heap-backed, growable
 
-For local variables and function-scoped data. Allocates from the heap and grows automatically via `realloc`.
+For local variables and function-scoped data. Grows automatically as elements are pushed.
 
 ```chasm
 arr :: []int = array_new(4)
@@ -445,7 +424,7 @@ arr.clear()
 
 ### `array_fixed(N)` — arena-backed, fixed capacity
 
-For module attributes (`@name`). Allocates from the arena that matches the attribute's declared lifetime — no heap, no `malloc`, no GC. The capacity is fixed at declaration time; pushing beyond it aborts with an error.
+For module attributes (`@name`). Allocates from the arena that matches the attribute's declared lifetime. The capacity is fixed at declaration time; pushing beyond it aborts with an error.
 
 ```chasm
 @bullets :: script     = array_fixed(8)       # int array, seeded via push
@@ -483,7 +462,7 @@ def on_tick(dt :: float) do
 end
 ```
 
-The array header and data are one contiguous allocation inside the arena. On hot-reload the script arena resets and `chasm_module_init` re-initialises the array automatically — no manual cleanup needed.
+On hot-reload the script arena resets and the array is re-initialised automatically — no manual cleanup needed.
 
 Use `array_fixed` for any module-level array where the maximum size is known upfront. Use `array_new` for local scratch arrays inside functions.
 
@@ -714,66 +693,3 @@ type          ::= 'int' | 'float' | 'bool' | 'string' | 'atom' | 'strbuild' | '[
 lifetime      ::= 'frame' | 'script' | 'persistent'
 ```
 
----
-
-## Code Generation
-
-Chasm compiles to C99. The generated C:
-
-- Embeds `ChasmCtx*` in every function signature.
-- Uses three arena allocators (frame, script, persistent) — **no heap allocation**. `array_fixed` module attributes allocate from the arena matching their declared lifetime; `array_new` local arrays use the heap only within function scope.
-- Produces a `chasm_rt.h` runtime header with all standard library implementations.
-- Is readable — variable names, struct names, and function names are preserved.
-- Has no hidden threads, no GC, no runtime beyond `libc`.
-
-### Array code generation
-
-For `@name :: lifetime = array_fixed(N)` the compiler emits an int array:
-
-```c
-static ChasmArray g_name;
-
-void chasm_module_init(ChasmCtx *ctx) {
-    g_name = chasm_array_fixed_in(&ctx->script, N);
-}
-```
-
-For `@name :: lifetime = array_fixed(N, 0.0)` (float default) the compiler emits a float array and pre-fills all slots:
-
-```c
-static ChasmArray g_name;
-
-void chasm_module_init(ChasmCtx *ctx) {
-    g_name = chasm_array_fixed_in_f(&ctx->script, N);
-    { int64_t _cap = N; for (int64_t _di = 0; _di < _cap; _di++) ((double*)g_name.data)[_di] = 0.0; g_name.len = N; }
-}
-```
-
-`get`/`set` on a float array use `double*` casts internally — the Chasm source sees plain `float` values with no manual conversion.
-
-`chasm_array_fixed_in` / `chasm_array_fixed_in_f` allocate `N × 8` bytes from the named arena in one contiguous block. `chasm_array_push_fixed` / `chasm_array_push_fixed_f` are bounds-checked pushes that abort on overflow — no realloc, no pointer invalidation.
-
-For `@name :: lifetime = array_fixed(N, StructName{...})` (struct default) the compiler emits a C typedef, typed accessor helpers, and a typed init:
-
-```c
-typedef struct {
-    double x;
-    double y;
-    int64_t active;
-} Bullet;
-
-static inline Bullet chasm_array_get_Bullet(ChasmCtx *ctx, ChasmArray *a, int64_t i);
-static inline void   chasm_array_set_Bullet(ChasmCtx *ctx, ChasmArray *a, int64_t i, Bullet v);
-static inline ChasmArray chasm_array_fixed_init_Bullet(ChasmArena *arena, int64_t cap, Bullet def);
-
-static ChasmArray g_bullets;
-
-void chasm_module_init(ChasmCtx *ctx) {
-    g_bullets = chasm_array_fixed_init_Bullet(&ctx->script, N,
-                    (Bullet){ .x = 0.0, .y = 0.0, .active = 0 });
-}
-```
-
-`.get()` and `.set()` calls on struct arrays use the typed helpers — no casting, no manual struct packing. Local variables assigned from `.get()` automatically receive the struct type.
-
-For `array_new(N)` inside a function the compiler emits `chasm_array_new(ctx, N)` which uses `malloc`/`realloc` and is scoped to the function call.
