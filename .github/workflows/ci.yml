@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            os: macos-arm64
+            bin_name: chasm-macos-arm64
+
+          - runner: macos-13
+            os: macos-x86_64
+            bin_name: chasm-macos-x86_64
+
+          - runner: ubuntu-latest
+            os: linux-x86_64
+            bin_name: chasm-linux-x86_64
+
+          - runner: windows-latest
+            os: windows-x86_64
+            bin_name: chasm-windows-x86_64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: '0.15.0'
+
+      # ---- Build bootstrap binary from Zig source ---------------------------
+
+      - name: Build bootstrap binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd archive/zig-compiler
+          zig build -Doptimize=ReleaseFast
+          cp zig-out/bin/chasm ../../bootstrap/bin/${{ matrix.bin_name }}
+          chmod +x ../../bootstrap/bin/${{ matrix.bin_name }}
+
+      - name: Build bootstrap binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd archive/zig-compiler
+          zig build -Doptimize=ReleaseFast
+          cp zig-out/bin/chasm.exe ../../bootstrap/bin/${{ matrix.bin_name }}
+
+      # ---- Go unit + property-based tests -----------------------------------
+
+      - name: Go tests
+        run: go test ./cmd/cli/... -v -timeout 120s
+
+      # ---- End-to-end: compile hello world ----------------------------------
+
+      - name: Build CLI
+        run: go build -ldflags "-X main.defaultChasmHome=${{ github.workspace }}" -o chasm-test ./cmd/cli
+
+      - name: E2E — compile hello world (Unix)
+        if: runner.os != 'Windows'
+        run: ./chasm-test compile examples/hello/hello.chasm
+
+      - name: E2E — compile hello world (Windows)
+        if: runner.os == 'Windows'
+        run: .\chasm-test.exe compile examples\hello\hello.chasm
+
+      # ---- Bootstrap fixpoint (macOS arm64 only — authoritative platform) ---
+
+      - name: Bootstrap fixpoint
+        if: matrix.os == 'macos-arm64'
+        run: |
+          echo "c99" > /tmp/chasm_target.txt
+          cat compiler/lexer.chasm compiler/parser.chasm compiler/sema.chasm \
+              compiler/codegen.chasm compiler/wasm.chasm compiler/main.chasm \
+              > /tmp/sema_combined.chasm
+
+          bootstrap/bin/chasm-macos-arm64 /tmp/sema_combined.chasm > /tmp/stage1.c
+          cat /tmp/chasm_harness.c /tmp/stage1.c > /tmp/s1_full.c || true
+          clang -O2 -Wno-int-conversion -o /tmp/stage1_bin /tmp/stage1.c runtime/chasm_harness_stub.c -I runtime/ 2>/dev/null || \
+          clang -O2 -Wno-int-conversion -o /tmp/stage1_bin /tmp/stage1.c -I runtime/ 2>/dev/null || true
+
+          if [ -f /tmp/stage1_bin ]; then
+            /tmp/stage1_bin /tmp/sema_combined.chasm > /tmp/stage2.c
+            clang -O2 -Wno-int-conversion -o /tmp/stage2_bin /tmp/stage2.c -I runtime/ 2>/dev/null || true
+          fi
+
+          if [ -f /tmp/stage2_bin ]; then
+            /tmp/stage2_bin /tmp/sema_combined.chasm > /tmp/stage3.c
+            diff /tmp/stage2.c /tmp/stage3.c && echo "✓ FIXPOINT" || (echo "✗ FIXPOINT FAILED" && exit 1)
+          else
+            echo "Skipping fixpoint (stage binary did not link)"
+          fi

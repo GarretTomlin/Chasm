@@ -63,20 +63,43 @@ The memory model is also what makes hot-reload safe. When a script is reloaded, 
 
 ---
 
+## Platform support
+
+| Platform | Status |
+|---|---|
+| macOS arm64 (Apple Silicon) | ✓ |
+| macOS x86_64 (Intel) | ✓ |
+| Linux x86_64 | ✓ |
+| Windows x86_64 | ✓ |
+
 ## Installation
 
-Requires [Go](https://go.dev/dl/) 1.21+.
+### One-liner (macOS / Linux)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Chasm-lang/Chasm/main/install.sh | sh
+```
+
+### One-liner (Windows — PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/Chasm-lang/Chasm/main/install.ps1 | iex
+```
+
+Both scripts detect your platform, download the correct release from GitHub, and add `chasm` to your PATH.
+
+### From source (requires [Go](https://go.dev/dl/) 1.21+)
 
 ```bash
-git clone <repo>
-cd chasm
+git clone https://github.com/Chasm-lang/Chasm
+cd Chasm
 go run ./cmd/shazam             # installs to ~/.local/bin
 go run ./cmd/shazam /usr/local  # installs system-wide
 ```
 
-`shazam` builds the `chasm` CLI from source, bakes in the repo path, and installs the Cursor/VS Code extension. No Zig required.
+`shazam` builds the CLI from source and installs the Cursor/VS Code extension. No Zig required.
 
-After install:
+### After install
 
 ```bash
 chasm run examples/hello/hello.chasm
@@ -92,17 +115,24 @@ compiler/          — compiler source (written in Chasm)
   parser.chasm
   sema.chasm
   codegen.chasm
+  wasm.chasm
   main.chasm
 runtime/           — C runtime header included in generated output
   chasm_rt.h
-std/               — standard library (TODO)
-bootstrap/         — pre-built bootstrap binary
+bootstrap/         — pre-built bootstrap binaries
   bin/
     chasm-macos-arm64
-engine/            — Raylib integration
+    chasm-macos-x86_64
+    chasm-linux-x86_64
+    chasm-windows-x86_64.exe
+engine/            — engine integrations
+  raylib/          — Raylib 5.5
+  wasm/            — Canvas2D browser runtime
 editors/           — VS Code / Cursor extension
 archive/
-  zig-compiler/    — original Zig compiler (frozen, no PRs)
+  zig-compiler/    — original Zig compiler (source for bootstrap builds)
+install.sh         — macOS/Linux one-liner installer
+install.ps1        — Windows one-liner installer
 SPEC.md            — language specification
 CHANGELOG.md       — version history
 ```

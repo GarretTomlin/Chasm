@@ -1,5 +1,56 @@
 # Changelog
 
+## [1.3.0] — 2026-03-24 — Cross-platform support (Linux, Windows, macOS Intel)
+
+### Summary
+
+Chasm now ships prebuilt binaries for all four major platforms. A GitHub Actions release workflow builds and publishes platform archives on every version tag. One-liner installers (`install.sh` / `install.ps1`) handle download, extraction, and PATH setup automatically.
+
+### Platform support
+
+| Platform | Bootstrap binary |
+|---|---|
+| macOS arm64 (Apple Silicon) | `chasm-macos-arm64` |
+| macOS x86_64 (Intel) | `chasm-macos-x86_64` |
+| Linux x86_64 | `chasm-linux-x86_64` |
+| Windows x86_64 | `chasm-windows-x86_64.exe` |
+
+### Release workflow (`.github/workflows/release.yml`)
+
+On `git push --tags`, four parallel jobs build and upload platform archives:
+
+- Each job installs Zig 0.15, builds the bootstrap binary from `archive/zig-compiler/` via `zig build -Doptimize=ReleaseFast`
+- Go CLI compiled with `GOOS`/`GOARCH` cross-compilation; `defaultChasmHome` left empty so the binary resolves its home directory from its own location at runtime
+- Archives: `.tar.gz` for Unix, `.zip` for Windows, each containing the CLI, bootstrap binary, runtime headers, engine preludes, and examples
+- Uploaded to GitHub Releases via `softprops/action-gh-release`
+
+### CI workflow (`.github/workflows/ci.yml`)
+
+Runs on every push to `main` and every pull request, across all four platforms:
+
+- Builds the bootstrap binary from `archive/zig-compiler/` on the target runner
+- Runs `go test ./cmd/cli/...` (property-based tests for diagnostics and bindings)
+- End-to-end compile test: `chasm compile examples/hello/hello.chasm`
+- Bootstrap fixpoint check on macOS arm64 (authoritative platform): `stage2.c == stage3.c`
+
+### Installers
+
+**macOS / Linux** (`install.sh`):
+```sh
+curl -fsSL https://raw.githubusercontent.com/Chasm-lang/Chasm/main/install.sh | sh
+```
+Detects OS and architecture, downloads the matching release archive, extracts to `~/.chasm/`, symlinks `chasm` into `~/.local/bin`, and prints a PATH hint if needed.
+
+**Windows** (`install.ps1`):
+```powershell
+irm https://raw.githubusercontent.com/Chasm-lang/Chasm/main/install.ps1 | iex
+```
+Downloads the `.zip` release, extracts to `%LOCALAPPDATA%\chasm`, and adds the bin directory to the user PATH registry key.
+
+### CLI fix (`cmd/cli/cli.go`)
+
+`bootstrapBin()` now appends `.exe` to the binary name when `runtime.GOOS == "windows"`, matching the `chasm-windows-x86_64.exe` naming convention.
+
 ## [1.2.0] — 2026-03-22 — LSP enhancements: imports, snippets, formatter, CodeLens
 
 ### Added

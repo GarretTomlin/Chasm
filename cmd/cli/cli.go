@@ -587,6 +587,9 @@ func bootstrapBin() string {
 	// Normalise to match the file naming convention.
 	name = strings.ReplaceAll(name, "darwin", "macos")
 	name = strings.ReplaceAll(name, "amd64", "x86_64")
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
 	bin := filepath.Join(home, "bootstrap", "bin", name)
 	if _, err := os.Stat(bin); err != nil {
 		fatalf("bootstrap binary not found: %s\n  Set CHASM_HOME to the chasm repo root.\n", bin)
