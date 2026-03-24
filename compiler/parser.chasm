@@ -553,6 +553,51 @@ defp parse_postfix(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp
     end
     k = tok_kind(tokens, pos)
   end
+  # struct update: expr with { field: new_val, ... }
+  if tok_kind(tokens, pos) == :ident and tok_lex(tokens, pos) == "with" do
+    wline = tok_line(tokens, pos)
+    wcol  = tok_col(tokens, pos)
+    pos   = pos + 1
+    if tok_kind(tokens, pos) == :lbrace do
+      pos = pos + 1
+    end
+    wfi_list :: []int = []
+    while tok_kind(tokens, pos) != :rbrace and tok_kind(tokens, pos) != :eof do
+      fname = tok_lex(tokens, pos)
+      fline = tok_line(tokens, pos)
+      fcol  = tok_col(tokens, pos)
+      pos   = pos + 1
+      if tok_kind(tokens, pos) == :colon do
+        pos = pos + 1
+      end
+      r    = parse_expr(tokens, pool, np, ch, cp, pos)
+      pos  = r.pos
+      np   = r.np
+      cp   = r.cp
+      fval = r.node_idx
+      fi   = np
+      np   = alloc_node(pool, np, :field_init, fval, 0, 0, fname, fline, fcol)
+      wfi_list.push(fi)
+      if tok_kind(tokens, pos) == :comma do
+        pos = pos + 1
+      end
+      pos = skip_newlines(tokens, pos)
+    end
+    if tok_kind(tokens, pos) == :rbrace do
+      pos = pos + 1
+    end
+    cs = cp
+    wi = 0
+    while wi < wfi_list.len do
+      fv = wfi_list.get(wi)
+      ch.set(cp, fv)
+      cp = cp + 1
+      wi = wi + 1
+    end
+    node_idx = np
+    np  = alloc_node(pool, np, :struct_update, lhs, cs, wfi_list.len, "", wline, wcol)
+    lhs = node_idx
+  end
   return ParseResult{ pos: pos, np: np, cp: cp, node_idx: lhs }
 end
 

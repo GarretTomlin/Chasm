@@ -295,6 +295,15 @@ v :: Vec2 = Vec2 { x: 1.0, y: 2.0 }
 
 Structs are value types — copied on assignment, no heap allocation.
 
+**Struct update** — copy a struct with specific fields overridden using `with`:
+
+```chasm
+# Only override the fields that changed; all others are copied from the base
+@enemies.set(i, e with { x: e.x + dx_step, y: e.y + dy_step })
+```
+
+The expression `base with { field: new_val, ... }` is equivalent to writing a full struct literal with every unchanged field copied from `base`. The struct type is inferred from `base`.
+
 ### Enums
 
 Tag-only enums:
@@ -686,8 +695,9 @@ pipe_expr     ::= cmp_expr ('|>' call_expr)*
 cmp_expr      ::= add_expr (cmp_op add_expr)*
 add_expr      ::= mul_expr (('+' | '-') mul_expr)*
 mul_expr      ::= unary_expr (('*' | '/') unary_expr)*
-unary_expr    ::= ('-' | 'not') unary_expr | primary_expr
-primary_expr  ::= literal | IDENT | '@' IDENT | call_expr | method_chain | struct_lit | array_lit | '(' expr ')'
+unary_expr    ::= ('-' | 'not') unary_expr | postfix_expr
+postfix_expr  ::= primary_expr ('.' IDENT ('(' args ')')? | '[' expr ']')* ('with' '{' field_init* '}')?
+primary_expr  ::= literal | IDENT | '@' IDENT | call_expr | struct_lit | array_lit | '(' expr ')'
 
 type          ::= 'int' | 'float' | 'bool' | 'string' | 'atom' | 'strbuild' | '[]' type | IDENT
 lifetime      ::= 'frame' | 'script' | 'persistent'

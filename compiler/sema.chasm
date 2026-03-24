@@ -760,6 +760,30 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
     return tid
   end
 
+  if tag == :struct_update do
+    base_tid    = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+    struct_name :: string = ""
+    si = 0
+    while si < structs.len do
+      sd = structs.get(si)
+      if sd.type_id == base_tid do
+        struct_name = sd.name
+      end
+      si = si + 1
+    end
+    updated :: Node = Node{ tag: node.tag, a: node.a, b: node.b, c: node.c, name: struct_name, line: node.line, col: node.col }
+    pool.set(idx, updated)
+    fi = 0
+    while fi < node.c do
+      field_node_idx = ch.get(node.b + fi)
+      fnode = pool.get(field_node_idx)
+      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, fnode.a)
+      fi = fi + 1
+    end
+    types.set(idx, base_tid)
+    return base_tid
+  end
+
   return 0
 end
 

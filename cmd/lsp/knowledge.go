@@ -23,6 +23,7 @@ var builtinDocs = map[string]string{
 	"and":        "**and** — logical AND operator",
 	"or":         "**or** — logical OR operator",
 	"not":        "**not** — logical NOT operator",
+	"with":       "**with** — struct update expression\n```chasm\nexpr with { field: new_val, ... }\n```\nCopies the base struct and overrides the listed fields. All other fields are taken from the base expression.",
 
 	// ---- lifetime promotions ----
 	"copy_to_script": "```chasm\ncopy_to_script(x)\n```\nCopies `x` into the script arena. Promotes frame → script lifetime.",
@@ -154,6 +155,7 @@ func keywordItems() []CompletionItem {
 		{"persist_copy", "persist_copy($0)", "promote to persistent lifetime"},
 		{"array_fixed", "array_fixed($1, $0)", "arena-backed fixed array"},
 		{"array_new", "array_new($0)", "heap-backed growable array"},
+		{"with", "with { $0 }", "struct update — copy with overrides"},
 	}
 	var items []CompletionItem
 	for _, kw := range keywords {

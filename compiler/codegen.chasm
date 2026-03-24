@@ -403,6 +403,51 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
     return str_concat("(", str_concat(node.name, str_concat("){ ", str_concat(flds_c, " }"))))
   end
 
+  if tag == :struct_update do
+    struct_name  = node.name
+    base_c       = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
+    struct_tid   = 0
+    si           = 0
+    while si < structs.len do
+      sd = structs.get(si)
+      if sd.name == struct_name do
+        struct_tid = sd.type_id
+      end
+      si = si + 1
+    end
+    flds_c      = ""
+    field_count = 0
+    fdi         = 0
+    while fdi < fields.len do
+      fd = fields.get(fdi)
+      if fd.struct_tid == struct_tid do
+        is_overridden = 0
+        override_c    = ""
+        oi            = 0
+        while oi < node.c do
+          field_node_idx = ch.get(node.b + oi)
+          fnode = pool.get(field_node_idx)
+          if fnode.name == fd.name do
+            is_overridden = 1
+            override_c    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, fnode.a)
+          end
+          oi = oi + 1
+        end
+        if field_count > 0 do flds_c = str_concat(flds_c, ", ") end
+        val_c = ""
+        if is_overridden == 1 do
+          val_c = override_c
+        else
+          val_c = str_concat(base_c, str_concat(".", fd.name))
+        end
+        flds_c = str_concat(flds_c, str_concat(".", str_concat(fd.name, str_concat(" = ", val_c))))
+        field_count = field_count + 1
+      end
+      fdi = fdi + 1
+    end
+    return str_concat("(", str_concat(struct_name, str_concat("){ ", str_concat(flds_c, " }"))))
+  end
+
   if tag == :match_expr do
     subj_c    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
     subj_t    = types.get(node.a)

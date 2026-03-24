@@ -129,7 +129,7 @@ defp move_enemies(dt :: float) do
       dy   :: frame = @player_y - e.y
       dist :: frame = sqrt(dx * dx + dy * dy)
       if dist > 1.0 do
-        @enemies.set(i, Enemy{ x: e.x + (dx / dist) * 60.0 * dt, y: e.y + (dy / dist) * 60.0 * dt, alive: e.alive })
+        @enemies.set(i, e with { x: e.x + (dx / dist) * 60.0 * dt, y: e.y + (dy / dist) * 60.0 * dt })
       end
     end
   end
