@@ -42,16 +42,10 @@ jobs:
               > /tmp/sema_combined.chasm
 
           bootstrap/bin/chasm-macos-arm64 > /tmp/stage1.c
-          clang -O2 -Wno-int-conversion -o /tmp/stage1_bin /tmp/stage1.c runtime/chasm_standalone.c -I runtime/ 2>/dev/null || true
+          clang -O2 -Wno-int-conversion -o /tmp/stage1_bin /tmp/stage1.c runtime/chasm_standalone.c -I runtime/
 
-          if [ -f /tmp/stage1_bin ]; then
-            /tmp/stage1_bin > /tmp/stage2.c
-            clang -O2 -Wno-int-conversion -o /tmp/stage2_bin /tmp/stage2.c -I runtime/ 2>/dev/null || true
-          fi
+          /tmp/stage1_bin > /tmp/stage2.c
+          clang -O2 -Wno-int-conversion -o /tmp/stage2_bin /tmp/stage2.c runtime/chasm_standalone.c -I runtime/
 
-          if [ -f /tmp/stage2_bin ]; then
-            /tmp/stage2_bin > /tmp/stage3.c
-            diff /tmp/stage2.c /tmp/stage3.c && echo "✓ FIXPOINT" || (echo "✗ FIXPOINT FAILED" && exit 1)
-          else
-            echo "Skipping fixpoint (stage binary did not link)"
-          fi
+          /tmp/stage2_bin > /tmp/stage3.c
+          diff /tmp/stage2.c /tmp/stage3.c && echo "✓ FIXPOINT" || (echo "✗ FIXPOINT FAILED" && exit 1)
