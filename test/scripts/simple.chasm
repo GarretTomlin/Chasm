@@ -2,8 +2,8 @@
 
 @counter :: script = 0
 
-def tick() do
-  @counter = copy_to_script(@counter + 1)
+def main() do
+  @counter = persist_copy(@counter + 1)
   print(@counter)
 end
 

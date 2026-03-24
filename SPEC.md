@@ -453,7 +453,7 @@ For module attributes (`@name`). Allocates from the arena that matches the attri
 @records :: persistent = array_fixed(4)       # never reset
 ```
 
-**Typed arrays with a default value** — pass a second argument to `array_fixed` to declare the element type and pre-fill all slots at init time. The type is inferred from the default literal: an integer default gives `[]int`, a float default gives `[]float`.
+**Typed arrays with a default value** — pass a second argument to `array_fixed` to declare the element type and pre-fill all slots at init time. The type is inferred from the default literal: an integer default gives `[]int`, a float default gives `[]float`, and a struct literal default gives `[]StructName`.
 
 ```chasm
 @bullet_x :: script = array_fixed(4, 0.0)   # []float, all slots initialised to 0.0
@@ -462,6 +462,26 @@ For module attributes (`@name`). Allocates from the arena that matches the attri
 ```
 
 With a default, `on_init` needs no push loop — all slots are ready immediately. `get`/`set` on a float array return and accept `float` directly, with no `to_float`/`to_int` casting required.
+
+**Struct arrays** — pass a struct literal as the default to create a fixed array of structs. All slots are pre-filled with the given default value. `get` returns the struct by value; `set` writes a new struct literal into a slot.
+
+```chasm
+defstruct Bullet do
+  x      :: float
+  y      :: float
+  vel_x  :: float
+  vel_y  :: float
+  active :: int
+end
+
+@bullets :: script = array_fixed(8, Bullet{ x: 0.0, y: 0.0, vel_x: 0.0, vel_y: 0.0, active: 0 })
+
+def on_tick(dt :: float) do
+  b :: frame = @bullets.get(0)        # returns Bullet by value
+  @bullets.set(0, Bullet{ x: b.x + b.vel_x * dt, y: b.y + b.vel_y * dt,
+                           vel_x: b.vel_x, vel_y: b.vel_y, active: b.active })
+end
+```
 
 The array header and data are one contiguous allocation inside the arena. On hot-reload the script arena resets and `chasm_module_init` re-initialises the array automatically — no manual cleanup needed.
 
@@ -732,5 +752,28 @@ void chasm_module_init(ChasmCtx *ctx) {
 `get`/`set` on a float array use `double*` casts internally — the Chasm source sees plain `float` values with no manual conversion.
 
 `chasm_array_fixed_in` / `chasm_array_fixed_in_f` allocate `N × 8` bytes from the named arena in one contiguous block. `chasm_array_push_fixed` / `chasm_array_push_fixed_f` are bounds-checked pushes that abort on overflow — no realloc, no pointer invalidation.
+
+For `@name :: lifetime = array_fixed(N, StructName{...})` (struct default) the compiler emits a C typedef, typed accessor helpers, and a typed init:
+
+```c
+typedef struct {
+    double x;
+    double y;
+    int64_t active;
+} Bullet;
+
+static inline Bullet chasm_array_get_Bullet(ChasmCtx *ctx, ChasmArray *a, int64_t i);
+static inline void   chasm_array_set_Bullet(ChasmCtx *ctx, ChasmArray *a, int64_t i, Bullet v);
+static inline ChasmArray chasm_array_fixed_init_Bullet(ChasmArena *arena, int64_t cap, Bullet def);
+
+static ChasmArray g_bullets;
+
+void chasm_module_init(ChasmCtx *ctx) {
+    g_bullets = chasm_array_fixed_init_Bullet(&ctx->script, N,
+                    (Bullet){ .x = 0.0, .y = 0.0, .active = 0 });
+}
+```
+
+`.get()` and `.set()` calls on struct arrays use the typed helpers — no casting, no manual struct packing. Local variables assigned from `.get()` automatically receive the struct type.
 
 For `array_new(N)` inside a function the compiler emits `chasm_array_new(ctx, N)` which uses `malloc`/`realloc` and is scoped to the function call.
