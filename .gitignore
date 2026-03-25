@@ -1,5 +1,7 @@
 node_modules
 .vscode
+/cli
+/lsp
 .claude
 .zig-cache
 .zig-out
