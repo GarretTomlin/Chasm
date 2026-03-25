@@ -2,8 +2,8 @@
 //
 // Implements: compile, run, watch, version.
 // Compilation pipeline:
-//  1. Write source (+ optional prelude) to /tmp/sema_combined.chasm
-//  2. Run the bootstrap binary on /tmp/sema_combined.chasm → stdout → /tmp/chasm_out.c
+//  1. Write source (+ optional prelude) to <tmpdir>/sema_combined.chasm
+//  2. Run the bootstrap binary on sema_combined.chasm → stdout → <tmpdir>/chasm_out.c
 //  3. cc-compile with the appropriate harness
 //  4. exec (for run/watch)
 package main
@@ -21,6 +21,11 @@ import (
 )
 
 const version = "1.1.0"
+
+// tmpPath returns a path inside the OS temp directory.
+func tmpPath(name string) string {
+	return filepath.Join(os.TempDir(), name)
+}
 
 // defaultChasmHome is baked in at build time by install.sh:
 //
@@ -243,23 +248,23 @@ func compileChasm(path string, opts options) (string, error) {
 	}
 	combined = append(combined, src...)
 
-	if err := os.WriteFile("/tmp/sema_combined.chasm", combined, 0644); err != nil {
-		fatalf("write /tmp/sema_combined.chasm: %v\n", err)
+	if err := os.WriteFile(tmpPath("sema_combined.chasm"), combined, 0644); err != nil {
+		fatalf("write sema_combined.chasm: %v\n", err)
 	}
 
-	// Bootstrap binary reads /tmp/sema_combined.chasm and /tmp/chasm_target.txt,
-	// then writes generated C (or WAT) to stdout.
+	// Bootstrap binary reads sema_combined.chasm and chasm_target.txt from the
+	// OS temp dir, then writes generated C (or WAT) to stdout.
 	target := "c99"
 	if opts.targetWasm {
 		target = "wasm"
 	}
-	if err := os.WriteFile("/tmp/chasm_target.txt", []byte(target), 0644); err != nil {
-		fatalf("write /tmp/chasm_target.txt: %v\n", err)
+	if err := os.WriteFile(tmpPath("chasm_target.txt"), []byte(target), 0644); err != nil {
+		fatalf("write chasm_target.txt: %v\n", err)
 	}
 
-	outPath := "/tmp/chasm_out.c"
+	outPath := tmpPath("chasm_out.c")
 	if opts.targetWasm {
-		outPath = "/tmp/chasm_out.wat"
+		outPath = tmpPath("chasm_out.wat")
 	}
 	bootstrap := bootstrapBin()
 	cmd := exec.Command(bootstrap)
@@ -276,7 +281,7 @@ func compileChasm(path string, opts options) (string, error) {
 
 	// Always write the runtime header from the repo (keeps it up to date).
 	rtSrc := filepath.Join(chasmHome(), "runtime", "chasm_rt.h")
-	if err := copyFile(rtSrc, "/tmp/chasm_rt.h"); err != nil {
+	if err := copyFile(rtSrc, tmpPath("chasm_rt.h")); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not copy chasm_rt.h: %v\n", err)
 	}
 
@@ -331,9 +336,9 @@ func buildAndRun(path string, opts options, quiet bool, procOut **exec.Cmd) {
 		return
 	}
 
-	binPath := "/tmp/chasm_run_out"
+	binPath := tmpPath("chasm_run_out")
 	harnessC := writeStandaloneHarness()
-	ccArgs := []string{"cc", "-o", binPath, outC, harnessC, "-I/tmp"}
+	ccArgs := []string{"cc", "-o", binPath, outC, harnessC, "-I" + os.TempDir()}
 
 	cc := exec.Command(ccArgs[0], ccArgs[1:]...)
 	cc.Stdout = os.Stdout
@@ -374,22 +379,26 @@ func compileSharedLib(path string, opts options) (string, error) {
 	eng := raylibEngineDir()
 	rl := raylibDir()
 
-	// Remove /tmp/chasm_rt.h so the generated code's #include "chasm_rt.h"
+	// Remove chasm_rt.h from temp so the generated code's #include "chasm_rt.h"
 	// falls through to -I engine/ and finds the engine's copy.
-	_ = os.Remove("/tmp/chasm_rt.h")
+	_ = os.Remove(tmpPath("chasm_rt.h"))
 
 	var ext string
 	var sharedArgs []string
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		ext = ".dylib"
 		sharedArgs = []string{"-dynamiclib", "-undefined", "dynamic_lookup"}
-	} else {
+	case "windows":
+		ext = ".dll"
+		sharedArgs = []string{"-shared"}
+	default:
 		ext = ".so"
 		sharedArgs = []string{"-shared", "-fPIC"}
 	}
 
 	// Unique path per compile — avoids macOS dylib caching in dlopen.
-	scriptPath := fmt.Sprintf("/tmp/chasm_script_%d%s", time.Now().UnixNano(), ext)
+	scriptPath := tmpPath(fmt.Sprintf("chasm_script_%d%s", time.Now().UnixNano(), ext))
 
 	args := []string{"cc"}
 	args = append(args, sharedArgs...)
@@ -446,7 +455,8 @@ func buildEngineOnly() (string, error) {
 		"-I" + filepath.Join(rl, "include"),
 		filepath.Join(rl, "lib", "libraylib.a"),
 	}
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		args = append(args,
 			"-framework", "OpenGL",
 			"-framework", "Cocoa",
@@ -455,7 +465,9 @@ func buildEngineOnly() (string, error) {
 			"-framework", "CoreAudio",
 			"-framework", "AudioToolbox",
 		)
-	} else {
+	case "windows":
+		args = append(args, "-lopengl32", "-lgdi32", "-lwinmm", "-lcomdlg32")
+	default: // Linux
 		args = append(args, "-lGL", "-lm", "-lpthread", "-ldl", "-lrt", "-lX11")
 	}
 
@@ -471,7 +483,7 @@ func buildEngineOnly() (string, error) {
 // writeReloadSentinel writes the dylib path into the sentinel file.
 // The engine reads the path from the file, then unlinks it.
 func writeReloadSentinel(dylibPath string) error {
-	return os.WriteFile("/tmp/chasm_reload_ready", []byte(dylibPath), 0644)
+	return os.WriteFile(tmpPath("chasm_reload_ready"), []byte(dylibPath), 0644)
 }
 
 func buildEngineCC(scriptC, binPath string) []string {
@@ -480,9 +492,9 @@ func buildEngineCC(scriptC, binPath string) []string {
 	mainC := filepath.Join(eng, "main.c")
 	shimH := filepath.Join(eng, "chasm_rl_shim.h")
 
-	// Remove /tmp/chasm_rt.h so the generated code's #include "chasm_rt.h" falls
-	// through to -I engine/ and finds the engine's copy — avoiding double-include.
-	_ = os.Remove("/tmp/chasm_rt.h")
+	// Remove chasm_rt.h from temp so the generated code's #include "chasm_rt.h"
+	// falls through to -I engine/ and finds the engine's copy — avoiding double-include.
+	_ = os.Remove(tmpPath("chasm_rt.h"))
 
 	args := []string{
 		"cc", "-o", binPath,
@@ -493,7 +505,8 @@ func buildEngineCC(scriptC, binPath string) []string {
 		"-I" + filepath.Join(rl, "include"),
 		filepath.Join(rl, "lib", "libraylib.a"),
 	}
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		args = append(args,
 			"-framework", "OpenGL",
 			"-framework", "Cocoa",
@@ -502,7 +515,9 @@ func buildEngineCC(scriptC, binPath string) []string {
 			"-framework", "CoreAudio",
 			"-framework", "AudioToolbox",
 		)
-	} else {
+	case "windows":
+		args = append(args, "-lopengl32", "-lgdi32", "-lwinmm", "-lcomdlg32")
+	default: // Linux
 		args = append(args, "-lGL", "-lm", "-lpthread", "-ldl", "-lrt", "-lX11")
 	}
 	return args
@@ -535,7 +550,7 @@ int main(void) {
     return 0;
 }
 `
-	path := "/tmp/chasm_harness.c"
+	path := tmpPath("chasm_harness.c")
 	if err := os.WriteFile(path, []byte(harness), 0644); err != nil {
 		fatalf("write harness: %v\n", err)
 	}
@@ -771,7 +786,7 @@ func filterCCErrors(raw []byte, chasmSrc string) {
 		}
 		// Try to match clang's  file:line:col: severity: message  pattern.
 		// We only reformat lines that reference our temp file.
-		if strings.HasPrefix(line, "/tmp/chasm_out.c:") || strings.HasPrefix(line, "/tmp/chasm_script_") {
+		if strings.HasPrefix(line, tmpPath("chasm_out.c")+":") || strings.HasPrefix(line, tmpPath("chasm_script_")) {
 			// Strip the file prefix: split on first 3 colons.
 			rest := line
 			// Remove the file path prefix up to and including the first ':'

@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased] — 2026-03-25 — Windows and Linux raylib engine support
+
+### Summary
+
+The raylib engine (`--engine raylib`) now works on Linux x86_64 and Windows x86_64. Pre-built raylib 5.5 static libraries and headers are bundled in the release archives for both platforms, matching the existing macOS distribution.
+
+### Changes
+
+- **feat**: bundled pre-built raylib 5.5 for Linux x86_64 (`engine/raylib/raylib-5.5_linux/`) and Windows x86_64 (`engine/raylib/raylib-5.5_windows/`) — users get raylib out of the box on all platforms
+- **feat**: Windows installer archive now includes `engine/raylib/raylib-5.5_windows/` (headers + `libraylib.a`) automatically via `cp -r engine` in the release workflow
+- **fix(cli)**: `compileSharedLib` outputs `.dll` on Windows instead of `.so`
+- **fix(cli)**: `buildEngineOnly` and `buildEngineCC` link `-lopengl32 -lgdi32 -lwinmm -lcomdlg32` on Windows instead of the Linux X11 flags
+- **fix(cli)**: all hardcoded `/tmp/` paths replaced with `os.TempDir()` via `tmpPath()` helper — compiler pipeline now works on Windows where `/tmp/` does not exist
+- **fix(engine)**: `loader.h` `CHASM_SCRIPT_EXT` now resolves to `.dll` on Windows (`_WIN32` branch added)
+- **fix(engine)**: `CHASM_RELOAD_SENTINEL` path uses `%TEMP%`/`%TMP%` on Windows via `chasm_sentinel_path()`
+
+---
+
 ## [1.5.0] — 2026-03-24 — Struct arrays, struct update syntax, LSP fixes
 
 ### Summary

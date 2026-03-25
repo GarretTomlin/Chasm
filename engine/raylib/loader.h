@@ -8,17 +8,36 @@
  */
 #include <dlfcn.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include "chasm_rt.h"
 
 /* ---- Paths ------------------------------------------------------------ */
 #if defined(__APPLE__)
-#  define CHASM_SCRIPT_EXT      ".dylib"
+#  define CHASM_SCRIPT_EXT ".dylib"
+#elif defined(_WIN32)
+#  define CHASM_SCRIPT_EXT ".dll"
 #else
-#  define CHASM_SCRIPT_EXT      ".so"
+#  define CHASM_SCRIPT_EXT ".so"
 #endif
-#define CHASM_RELOAD_SENTINEL   "/tmp/chasm_reload_ready"
+
+/* Returns the path to the reload sentinel file in the OS temp directory. */
+static const char *chasm_sentinel_path(void) {
+#if defined(_WIN32)
+    static char buf[512];
+    if (!buf[0]) {
+        const char *tmp = getenv("TEMP");
+        if (!tmp) tmp = getenv("TMP");
+        if (!tmp) tmp = "C:\\Temp";
+        snprintf(buf, sizeof(buf), "%s\\chasm_reload_ready", tmp);
+    }
+    return buf;
+#else
+    return "/tmp/chasm_reload_ready";
+#endif
+}
+#define CHASM_RELOAD_SENTINEL chasm_sentinel_path()
 
 /* Read the dylib path from the sentinel file (written by the CLI).
  * Returns 0 on success, -1 on failure. buf must be at least PATH_MAX bytes. */
