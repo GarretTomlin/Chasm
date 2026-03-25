@@ -2,6 +2,8 @@ node_modules
 .vscode
 /cli
 /lsp
+editors/vscode/out
+editors/vscode/*.vsix
 .claude
 .zig-cache
 .zig-out
