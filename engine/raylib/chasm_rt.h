@@ -40,6 +40,22 @@ static inline void chasm_clear_script(ChasmCtx *ctx) {
 #define chasm_copy_to_script(ctx, val) (val)
 #define chasm_persist_copy(ctx, val, ...) (val)
 
+/* String-specific promotion: copy a frame-arena string into a longer-lived arena. */
+static inline const char *chasm_str_to_script(ChasmCtx *ctx, const char *s) {
+    if (!s) return "";
+    size_t n = strlen(s);
+    char *o = (char *)chasm_alloc(&ctx->script, n + 1, 1);
+    if (!o) return s;
+    memcpy(o, s, n + 1); return o;
+}
+static inline const char *chasm_str_to_persistent(ChasmCtx *ctx, const char *s) {
+    if (!s) return "";
+    size_t n = strlen(s);
+    char *o = (char *)chasm_alloc(&ctx->persistent, n + 1, 1);
+    if (!o) return s;
+    memcpy(o, s, n + 1); return o;
+}
+
 /* ------------------------------------------------------------------ */
 /* Chasm standard library                                             */
 /* ------------------------------------------------------------------ */

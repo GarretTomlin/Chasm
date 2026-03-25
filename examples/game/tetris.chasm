@@ -50,6 +50,20 @@
 @lines :: script     = 0
 @level :: script     = 1
 
+# ---- Frame time graph -------------------------------------------------------
+# 120 samples stored in persistent arena — never GC'd, never moved.
+# Each sample is a frame dt in milliseconds * 10 (fixed-point, fits in int).
+# persistent lifetime means this buffer costs zero per frame — no allocation,
+# no GC scan, no copy. The arena pointer never moves after init.
+@ft_buf   :: persistent = array_fixed(120, 0)
+@ft_head  :: persistent = 0   # ring-buffer write index
+
+# ---- GC stress test ---------------------------------------------------------
+# Hold LEFT_SHIFT during play to run 500 heavy float computations per tick.
+# All temporaries are frame-lifetime — wiped in one pointer reset each tick.
+# No GC. No accumulation. Watch the graph stay flat under load.
+@stress_mode :: script = 0
+
 # ---- Game state  0=menu  1=playing  2=paused  3=gameover -------------------
 @gstate :: script = 0
 
@@ -233,7 +247,7 @@ defp spawn_piece() do
   @pr        = 0
   @px        = 3
   @py        = 0
-  @next_t    = copy_to_script(rand_piece())
+  @next_t    = copy_to_script(rand_piece())   # rand_piece returns frame; promote to script
   @hold_used = 0
   @lock_t    = 0.0
   @fall_t    = 0.0
@@ -337,6 +351,14 @@ end
 def on_tick(dt :: float) do
   update_music(@music)
 
+  # Record frame time into the persistent ring buffer.
+  # Skip the first 60 frames (startup/load cost) so the graph shows steady-state.
+  @ft_head = persist_copy((@ft_head + 1) - ((@ft_head + 1) / 120) * 120)
+  if @ft_head > 60 do
+    ms :: frame = to_int(dt * 1000.0)
+    @ft_buf.set(@ft_head, ms)
+  end
+
   if @gstate == 0 do
     if key_pressed(257) do reset_game() end
     return
@@ -380,7 +402,6 @@ def on_tick(dt :: float) do
   # ---- Rotate (UP = 265) ---------------------------------------------------
   if key_pressed(265) do
     nr :: frame = (@pr + 1) - ((@pr + 1) / 4) * 4
-    # Try centre, kick left, kick right, kick left-2 (I-piece)
     rotated :: frame = 0
     if collides(@pt, nr, @px, @py) == 0 do
       @pr = copy_to_script(nr)
@@ -479,7 +500,6 @@ def on_tick(dt :: float) do
   if key_down(264) do interval = fall_interval() / 10.0 end
 
   if on_floor == 0 do
-    # Piece is airborne — advance gravity accumulator, drop one row if due.
     @fall_t = @fall_t + step_dt
     if @fall_t >= interval do
       @fall_t = 0.0
@@ -487,13 +507,28 @@ def on_tick(dt :: float) do
       @lock_t = 0.0
     end
   else
-    # Piece is resting — advance lock delay, lock when expired.
     @lock_t = @lock_t + step_dt
     if @lock_t >= 0.5 do
       lock_piece()
       play_sound(@snd_drop)
       after_lock()
     end
+  end
+
+  # ---- GC stress test ------------------------------------------------------
+  # SHIFT held = do 500 heavy float computations using frame-lifetime locals.
+  # All temporaries live in the frame arena — wiped by one pointer reset.
+  # No GC. No accumulation. Watch the graph stay flat under load.
+  @stress_mode = 0
+  if key_down(340) do
+    @stress_mode = 1
+    acc :: frame = 0.0
+    for i in 0..500 do
+      fi  :: frame = to_float(i)
+      acc = acc + sin(fi * 0.1) * cos(fi * 0.07) + sqrt(abs(fi - 250.0))
+    end
+    # Use acc so compiler can't eliminate the loop
+    if acc > 999999.0 do @stress_mode = 2 end
   end
 end
 
@@ -628,4 +663,31 @@ def on_draw() do
   end
 
   draw_fps(10.0, 700.0)
+
+  # ---- Frame time graph ----------------------------------------------------
+  # Draws 120 bars showing dt history. A flat line = no GC pauses.
+  # Spikes = frame drops. In Chasm these should be absent because:
+  #   - frame arena: reset by one pointer assignment per tick
+  #   - script arena: never touched by a collector
+  #   - persistent arena: never freed, never scanned
+  # There is no garbage collector. There is nothing to pause.
+  graph_x :: frame = 10.0
+  graph_y :: frame = 680.0
+  graph_h :: frame = 40.0   # max bar height = 50ms scale
+  for i in 0..120 do
+    idx  :: frame = (i + @ft_head) - ((i + @ft_head) / 120) * 120
+    ms_v :: frame = @ft_buf.get(idx)
+    bar  :: frame = clamp(ms_v * 0.8, 0.0, graph_h)
+    col  :: frame = 0x44FF88FF
+    if ms_v > 50 do col = 0xFF4422FF end   # red if over 50ms (sub-20fps)
+    if ms_v > 33 do col = 0xFFAA00FF end   # orange if over 33ms (sub-30fps)
+    draw_rect(graph_x + i * 1.0, graph_y + graph_h - bar, 1.0, bar, col)
+  end
+  # 16ms reference line (60fps target)
+  draw_line(graph_x, graph_y + graph_h - 12.8, graph_x + 120.0, graph_y + graph_h - 12.8, 0xFFFFFF33)
+  draw_text("frame ms (60fps line)", graph_x, graph_y - 14.0, 11, 0x555555FF)
+
+  if @stress_mode == 1 do
+    draw_text("STRESS: 500 frame allocs/tick — no GC", graph_x, graph_y - 26.0, 11, 0xFF8800FF)
+  end
 end

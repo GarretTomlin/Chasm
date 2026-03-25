@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct {
@@ -11,10 +12,18 @@ typedef struct {
     size_t   cap;
 } ChasmArena;
 
+/* Frame-heap tracker: malloc'd blocks (arrays, builders) registered here
+ * are freed automatically when chasm_clear_frame is called.
+ * 512 slots covers the vast majority of real games with headroom to spare. */
+#define CHASM_FRAME_HEAP_CAP 512
+
 typedef struct {
     ChasmArena frame;
     ChasmArena script;
     ChasmArena persistent;
+    /* frame-heap GC */
+    void *_fh[CHASM_FRAME_HEAP_CAP];
+    int   _fhn;
 } ChasmCtx;
 
 static inline void *chasm_alloc(ChasmArena *a, size_t n, size_t align) {
@@ -26,23 +35,49 @@ static inline void *chasm_alloc(ChasmArena *a, size_t n, size_t align) {
     return p;
 }
 
+/* Register a malloc'd pointer for automatic free on chasm_clear_frame. */
+static inline void chasm_fh_register(ChasmCtx *ctx, void *p) {
+    if (p && ctx->_fhn < CHASM_FRAME_HEAP_CAP)
+        ctx->_fh[ctx->_fhn++] = p;
+}
+
 static inline void chasm_clear_frame(ChasmCtx *ctx) {
+    for (int i = 0; i < ctx->_fhn; i++) { free(ctx->_fh[i]); ctx->_fh[i] = NULL; }
+    ctx->_fhn   = 0;
     ctx->frame.used = 0;
 }
 
 /* Promote a scalar value to a longer-lived arena (primitive: no-op copy). */
 #define chasm_promote_scalar(val) (val)
-/* Lifetime promotion builtins — compile-time lifetime checks, runtime no-op. */
+
+/* copy_to_script / persist_copy — scalars are no-ops; strings are copied into
+ * the longer-lived arena so they survive frame resets.                       */
 #define chasm_copy_to_script(ctx, val) (val)
 #define chasm_persist_copy(ctx, val, ...) (val)
+
+/* String-specific promotion: copy a frame-arena string into a longer-lived arena. */
+static inline const char *chasm_str_to_script(ChasmCtx *ctx, const char *s) {
+    if (!s) return "";
+    size_t n = strlen(s);
+    char *o = (char *)chasm_alloc(&ctx->script, n + 1, 1);
+    if (!o) return s; /* arena full — return as-is (best effort) */
+    memcpy(o, s, n + 1);
+    return o;
+}
+static inline const char *chasm_str_to_persistent(ChasmCtx *ctx, const char *s) {
+    if (!s) return "";
+    size_t n = strlen(s);
+    char *o = (char *)chasm_alloc(&ctx->persistent, n + 1, 1);
+    if (!o) return s;
+    memcpy(o, s, n + 1);
+    return o;
+}
 
 /* ------------------------------------------------------------------ */
 /* Chasm standard library                                             */
 /* ------------------------------------------------------------------ */
 #include <math.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <time.h>
 
 /* ---- math -------------------------------------------------------- */
@@ -238,16 +273,24 @@ static inline int64_t chasm_time_ms(ChasmCtx *ctx)  { (void)ctx; struct timespec
 /* ---- arrays ------------------------------------------------------ */
 typedef struct { void *data; int64_t len; int64_t cap; } ChasmArray;
 static inline ChasmArray chasm_array_new(ChasmCtx *ctx, int64_t cap) {
-    (void)ctx;
     if (cap <= 0) return (ChasmArray){NULL, 0, 0};
     void *d = malloc((size_t)cap * 8);
+    chasm_fh_register(ctx, d);  /* freed by chasm_clear_frame */
     return (ChasmArray){d, 0, cap};
 }
 static inline void chasm_array_push(ChasmCtx *ctx, ChasmArray *a, int64_t v) {
     (void)ctx;
     if (a->len >= a->cap) {
         a->cap = a->cap * 2 + 8;
+        /* realloc may change pointer — update registration if possible */
+        void *old = a->data;
         a->data = realloc(a->data, (size_t)a->cap * 8);
+        if (a->data != old) {
+            /* update the registered pointer in the frame-heap slot */
+            for (int _i = 0; _i < ctx->_fhn; _i++) {
+                if (ctx->_fh[_i] == old) { ctx->_fh[_i] = a->data; break; }
+            }
+        }
     }
     if (a->data) ((int64_t*)a->data)[a->len++] = v;
 }
@@ -260,18 +303,32 @@ static inline void    chasm_array_clear(ChasmCtx *ctx, ChasmArray *a)           
 /* ---- string builder ---------------------------------------------- */
 typedef struct { char *buf; int64_t len; int64_t cap; } ChasmStrBuilder;
 static inline ChasmStrBuilder chasm_str_builder_new(ChasmCtx *ctx) {
-    (void)ctx; char *buf = (char*)malloc(64);
+    char *buf = (char*)malloc(64);
+    chasm_fh_register(ctx, buf);  /* freed by chasm_clear_frame */
     return (ChasmStrBuilder){buf, 0, 64};
 }
 static inline void chasm_str_builder_push(ChasmCtx *ctx, ChasmStrBuilder *b, int64_t c) {
-    (void)ctx;
-    if (b->len >= b->cap) { b->cap = b->cap*2+8; b->buf = (char*)realloc(b->buf, (size_t)b->cap); }
+    if (b->len >= b->cap) {
+        char *old = b->buf; b->cap = b->cap*2+8;
+        b->buf = (char*)realloc(b->buf, (size_t)b->cap);
+        if (b->buf != old) {
+            for (int _i = 0; _i < ctx->_fhn; _i++)
+                if (ctx->_fh[_i] == old) { ctx->_fh[_i] = b->buf; break; }
+        }
+    }
     if (b->buf) b->buf[b->len++] = (char)c;
 }
 static inline void chasm_str_builder_append(ChasmCtx *ctx, ChasmStrBuilder *b, const char *s) {
-    (void)ctx; if (!s) return;
+    if (!s) return;
     size_t sl = strlen(s);
-    while ((size_t)b->len + sl > (size_t)b->cap) { b->cap = b->cap*2+(int64_t)sl+8; b->buf = (char*)realloc(b->buf, (size_t)b->cap); }
+    while ((size_t)b->len + sl > (size_t)b->cap) {
+        char *old = b->buf; b->cap = b->cap*2+(int64_t)sl+8;
+        b->buf = (char*)realloc(b->buf, (size_t)b->cap);
+        if (b->buf != old) {
+            for (int _i = 0; _i < ctx->_fhn; _i++)
+                if (ctx->_fh[_i] == old) { ctx->_fh[_i] = b->buf; break; }
+        }
+    }
     if (b->buf) { memcpy(b->buf + b->len, s, sl); b->len += (int64_t)sl; }
 }
 static inline const char *chasm_str_builder_build(ChasmCtx *ctx, ChasmStrBuilder *b) {
