@@ -290,6 +290,7 @@ defp parse_primary(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp
     pos  = pos + 1
     if tok_kind(tokens, pos) == :lparen do
       pos = pos + 1
+      pos = skip_newlines(tokens, pos)
       arg_list :: []int = []
       while tok_kind(tokens, pos) != :rparen and tok_kind(tokens, pos) != :eof do
         r   = parse_expr(tokens, pool, np, ch, cp, pos)
@@ -300,6 +301,7 @@ defp parse_primary(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp
         arg_list.push(ai)
         if tok_kind(tokens, pos) == :comma do
           pos = pos + 1
+          pos = skip_newlines(tokens, pos)
         end
       end
       if tok_kind(tokens, pos) == :rparen do
@@ -505,6 +507,7 @@ defp parse_postfix(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp
       pos   = pos + 1
       if tok_kind(tokens, pos) == :lparen do
         pos = pos + 1
+        pos = skip_newlines(tokens, pos)
         marg_list :: []int = []
         while tok_kind(tokens, pos) != :rparen and tok_kind(tokens, pos) != :eof do
           r   = parse_expr(tokens, pool, np, ch, cp, pos)
@@ -515,6 +518,7 @@ defp parse_postfix(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp
           marg_list.push(ai)
           if tok_kind(tokens, pos) == :comma do
             pos = pos + 1
+            pos = skip_newlines(tokens, pos)
           end
         end
         if tok_kind(tokens, pos) == :rparen do
