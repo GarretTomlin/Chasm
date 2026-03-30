@@ -56,6 +56,8 @@ func main() {
 		runWatch(os.Args[2:])
 	case "fmt":
 		runFmt(os.Args[2:])
+	case "update":
+		runUpdate()
 	case "help", "--help", "-h":
 		usage()
 	default:
@@ -990,6 +992,24 @@ func normalizeColonColon(line string) string {
 	return strings.Join(parts, " :: ")
 }
 
+func runUpdate() {
+	fmt.Printf("Updating Chasm (current: %s)...\n", version)
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+			"-Command", "irm https://raw.githubusercontent.com/Chasm-lang/Chasm/main/install.ps1 | iex")
+	default:
+		cmd = exec.Command("sh", "-c",
+			"curl -fsSL https://raw.githubusercontent.com/Chasm-lang/Chasm/main/install.sh | sh")
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fatalf("update failed: %v\n", err)
+	}
+}
+
 func usage() {
 	fmt.Print(strings.TrimSpace(`
 chasm — Chasm compiler
@@ -999,6 +1019,7 @@ Usage:
   chasm run     <file.chasm> [--engine raylib]   compile and run
   chasm watch   <file.chasm> [--engine raylib]   watch and rerun on changes
   chasm fmt     <file.chasm>                     format source file in-place
+  chasm update                                   update to the latest release
   chasm version                                  print version
 
 Examples:
