@@ -1,0 +1,63 @@
+defstruct Enemy do
+  x      :: float = 0.0
+  y      :: float = 0.0
+  hp     :: int   = 10
+  active :: int   = 0
+end
+
+@enemies  :: script = array_fixed(32, Enemy{})
+@player_x :: script = 400.0
+@player_y :: script = 300.0
+@speed    :: script = 200.0
+@spawn_t  :: script = 0.0
+
+defp spawn_enemy(x :: float, y :: float) do
+  i = 0
+  while i < @enemies.len do
+    e = @enemies.get(i)
+    if e.active == 0 do
+      @enemies.set(i, e with { x: x, y: y, hp: 10, active: 1 })
+      return 0
+    end
+    i = i + 1
+  end
+  return 0
+end
+
+def on_tick(dt :: float) do
+  if key_down(:right) do @player_x = @player_x + @speed * dt end
+  if key_down(:left)  do @player_x = @player_x - @speed * dt end
+  if key_down(:up)    do @player_y = @player_y - @speed * dt end
+  if key_down(:down)  do @player_y = @player_y + @speed * dt end
+
+  @spawn_t = @spawn_t + dt
+  if @spawn_t > 2.0 do
+    spawn_enemy(rand_range(0.0, 800.0), rand_range(0.0, 600.0))
+    @spawn_t = 0.0
+  end
+
+  i = 0
+  while i < @enemies.len do
+    e = @enemies.get(i)
+    if e.active == 1 do
+      @enemies.set(i, e with { x: e.x + 2.0 * dt, hp: e.hp - 1 })
+      if e.hp <= 0 do
+        @enemies.set(i, e with { active: 0 })
+      end
+    end
+    i = i + 1
+  end
+end
+
+def on_draw() do
+  clear_background(0x181820ff)
+  draw_rectangle(@player_x - 16.0, @player_y - 16.0, 32.0, 32.0, 0x44aaffff)
+  i = 0
+  while i < @enemies.len do
+    e = @enemies.get(i)
+    if e.active == 1 do
+      draw_rectangle(e.x - 12.0, e.y - 12.0, 24.0, 24.0, 0xff4444ff)
+    end
+    i = i + 1
+  end
+end

@@ -297,3 +297,8 @@ static inline bool rl_check_collision_point_rec(double px, double py,
         (Vector2){(float)px,(float)py},
         (Rectangle){(float)rx,(float)ry,(float)rw,(float)rh});
 }
+
+/* rand_range: float in [lo, hi) */
+static inline double rl_rand_range(double lo, double hi) {
+    return lo + (hi - lo) * ((double)GetRandomValue(0, 32767) / 32767.0);
+}

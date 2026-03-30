@@ -131,3 +131,12 @@ extern fn set_clipboard(text: str) -> void                               = "rl_s
 extern fn collide_rects(x1: float, y1: float, w1: float, h1: float, x2: float, y2: float, w2: float, h2: float) -> bool = "rl_check_collision_recs"
 extern fn collide_circles(x1: float, y1: float, r1: float, x2: float, y2: float, r2: float) -> bool = "rl_check_collision_circles"
 extern fn point_in_rect(px: float, py: float, rx: float, ry: float, rw: float, rh: float) -> bool = "rl_check_collision_point_rec"
+
+# ---- Aliases (doc-friendly names) ------------------------------------------
+extern fn clear_background(color: int) -> void                           = "rl_clear_background"
+extern fn draw_rectangle(x: float, y: float, w: float, h: float, color: int) -> void = "rl_draw_rectangle"
+extern fn draw_rectangle_lines(x: float, y: float, w: float, h: float, color: int) -> void = "rl_draw_rectangle_lines"
+extern fn draw_circle_v(cx: float, cy: float, r: float, color: int) -> void = "rl_draw_circle"
+extern fn screen_width() -> int                                          = "rl_screen_width"
+extern fn screen_height() -> int                                         = "rl_screen_height"
+extern fn rand_range(lo: float, hi: float) -> float                      = "rl_rand_range"

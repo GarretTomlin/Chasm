@@ -1,0 +1,57 @@
+defstruct Player do
+  x         :: float = 0.0
+  y         :: float = 0.0
+  state     :: atom  = :normal
+  inv_timer :: float = 0.0
+end
+
+@player     :: script = Player{ x: 400.0, y: 300.0 }
+@high_score :: persistent = 0
+@score      :: script = 0
+@speed      :: script = 200.0
+
+defp take_hit(p :: Player) :: Player do
+  if p.state == :normal do
+    return p with { state: :invincible, inv_timer: 1.5 }
+  end
+  return p
+end
+
+def on_tick(dt :: float) do
+  p = @player
+  dx = 0.0
+  dy = 0.0
+  if key_down(:right) do dx = @speed end
+  if key_down(:left)  do dx = -@speed end
+  if key_down(:up)    do dy = -@speed end
+  if key_down(:down)  do dy = @speed end
+  p = p with { x: p.x + dx * dt, y: p.y + dy * dt }
+
+  if p.state == :invincible do
+    p = p with { inv_timer: p.inv_timer - dt }
+    if p.inv_timer <= 0.0 do
+      p = p with { state: :normal, inv_timer: 0.0 }
+    end
+  end
+
+  if key_pressed(:space) do
+    p = take_hit(p)
+  end
+
+  @player = p
+  @score = @score + 1
+  if @score > @high_score do
+    @high_score = persist_copy(@score)
+  end
+end
+
+def on_draw() do
+  clear_background(0x181820ff)
+  col = 0x44aaffff
+  if @player.state == :invincible do
+    col = 0xff8800ff
+  end
+  draw_rectangle(@player.x - 16.0, @player.y - 16.0, 32.0, 32.0, col)
+  draw_text("Score: #{@score}", 10, 10, 20, 0xffffffff)
+  draw_text("State: #{@player.state}", 10, 35, 20, 0xffffffff)
+end
