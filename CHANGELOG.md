@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.9.4] — 2026-03-30 — LSP block checker rewrite
+
+### Summary
+
+Replaced the fragile do/end token counter in the LSP with a stack-based tracker. Errors now point to the exact unclosed `do`, not the end of the file, and `else do` is handled correctly.
+
+### Changes
+
+- **fix(lsp)**: block checker now uses a stack — each unmatched `do` produces an error pointing to the `do` token itself, not the last line
+- **fix(lsp)**: `else do` correctly shares the enclosing `if`'s `end` slot and does not produce a false positive
+- **chore**: CLI version bumped to `1.9.4`
+
+---
+
 ## [1.9.3] — 2026-03-30 — else do formatter and LSP fix
 
 ### Summary

@@ -926,38 +926,49 @@ func skipExpr(ts *tokenStream) {
 // ---------------------------------------------------------------------------
 
 func checkUndefined(pr *parseResult, src string, lines []string) {
-	// Check for unclosed do/end blocks (simple heuristic)
-	doCount := 0
-	endCount := 0
+	// Track unclosed do/end blocks using a stack of opener positions.
+	// Each entry records the token position of a "do" that hasn't been closed.
+	// Rules:
+	//   "do"  → push (open a block), UNLESS it immediately follows "else"
+	//           (else do is part of the same if-block and shares its end)
+	//   "end" → pop (close the innermost open block)
+	type opener struct{ line, col int }
+	var stack []opener
 	var prevIdent string
+
 	ts := newTokenStream(src)
 	for {
 		t := ts.consume()
 		if t.kind == tokEOF {
 			break
 		}
-		if t.kind == tokIdent {
-			switch t.text {
-			case "do":
-				// `else do` shares the enclosing `if`'s `end` — don't count it.
-				if prevIdent != "else" {
-					doCount++
-				}
-			case "end":
-				endCount++
-			}
-			prevIdent = t.text
+		if t.kind != tokIdent {
+			continue
 		}
+		switch t.text {
+		case "do":
+			if prevIdent != "else" {
+				stack = append(stack, opener{t.line, t.col})
+			}
+		case "end":
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+		prevIdent = t.text
 	}
-	if doCount > endCount {
-		// Find the last 'do' without a matching 'end'
-		lastLine := len(lines) - 1
+
+	for _, op := range stack {
+		endCol := 0
+		if op.line < len(lines) {
+			endCol = len(lines[op.line])
+		}
 		pr.errors = append(pr.errors, diagEntry{
 			rng: Range{
-				Start: Position{lastLine, 0},
-				End:   Position{lastLine, len(lines[lastLine])},
+				Start: Position{op.line, op.col},
+				End:   Position{op.line, endCol},
 			},
-			msg: fmt.Sprintf("missing %d `end` keyword(s) — unclosed block", doCount-endCount),
+			msg: "unclosed `do` block — missing `end`",
 		})
 	}
 }
