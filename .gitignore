@@ -12,3 +12,4 @@ engine/raylib/.chasm_engine_cache
 # Generated C output from chasm compile
 examples/**/*.c
 testdata
+chasm-web
