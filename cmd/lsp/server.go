@@ -219,6 +219,9 @@ func (s *server) handleDidClose(msg rpcMsg) {
 
 func (s *server) publishDiagnostics(doc *document) {
 	diags := doc.diagnostics()
+	if diags == nil {
+		diags = []Diagnostic{}
+	}
 	s.notify("textDocument/publishDiagnostics", map[string]interface{}{
 		"uri":         doc.uri,
 		"diagnostics": diags,

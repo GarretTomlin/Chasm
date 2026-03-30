@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.9.5] — 2026-03-30 — LSP diagnostics stuck fix
+
+### Summary
+
+Errors shown while typing now clear correctly once the code is valid.
+
+### Changes
+
+- **fix(lsp)**: `publishDiagnostics` was sending `null` when there were no errors — VS Code only clears diagnostics on an empty array `[]`, not `null`, so errors from incomplete code got stuck permanently
+- **chore**: CLI version bumped to `1.9.5`
+
+---
+
 ## [1.9.4] — 2026-03-30 — LSP block checker rewrite
 
 ### Summary
