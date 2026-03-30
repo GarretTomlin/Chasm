@@ -1,117 +1,116 @@
 package main
 
 import (
+	"regexp"
 	"strings"
+	"unicode"
 )
 
-// formatDocument applies Chasm formatting rules to source text:
-//   - 2-space indentation (tabs → spaces, re-indent based on block depth)
-//   - One blank line between top-level declarations
-//   - Consistent spacing around `::` and `=`
+// formatDocument formats a Chasm source file following Ruby-style conventions:
+//   - 2-space indentation driven by do/end block depth
+//   - One blank line between top-level declarations (def, defp, defstruct, enum)
+//   - Spaces around binary operators: + - * / == != < > <= >= and or
+//   - Space after commas, space after colon in struct literals
+//   - # comments get a space after the hash
+//   - Aligned @attr declaration blocks (:: and = columns line up)
 //   - Strip trailing whitespace
 func formatDocument(src string) string {
+	// Pass 1: normalize each line individually (operators, commas, comments)
 	lines := strings.Split(src, "\n")
-	var out []string
-
-	depth := 0
-	prevWasBlank := false
-	prevWasTopLevel := false
-
-	// Top-level keywords that start a block
-	topLevelStarters := map[string]bool{
-		"def": true, "defp": true, "defstruct": true, "enum": true,
-	}
-	// Keywords that increase indent depth
-	blockOpeners := map[string]bool{
-		"do": true, "defstruct": true,
-	}
-	// Keywords that decrease indent depth
-	blockClosers := map[string]bool{
-		"end": true,
-	}
-	// Keywords that both decrease and increase (else, when handled inline)
-	blockMiddle := map[string]bool{
-		"else": true,
+	var normed []string
+	for _, l := range lines {
+		normed = append(normed, normalizeLine(strings.TrimSpace(l)))
 	}
 
-	for _, raw := range lines {
-		trimmed := strings.TrimSpace(raw)
+	// Pass 2: re-indent based on do/end depth
+	indented := reindent(normed)
 
-		// Blank line handling
-		if trimmed == "" {
-			if !prevWasBlank {
-				out = append(out, "")
+	// Pass 3: align consecutive @attr declaration blocks
+	aligned := alignAttrBlocks(indented)
+
+	// Finalize: collapse multiple blank lines, strip trailing blanks, ensure trailing newline
+	return finalize(aligned)
+}
+
+// ---- Pass 1: per-line normalization ----------------------------------------
+
+var reAttrLine = regexp.MustCompile(`^@\w+\s*::`)
+
+// normalizeLine applies all character-level normalizations to a single trimmed line.
+func normalizeLine(line string) string {
+	if line == "" {
+		return ""
+	}
+	// Split trailing comment before normalizing code
+	code, comment := splitComment(line)
+
+	code = normalizeColonColonSpacing(code)
+	code = normalizeCommas(code)
+	code = normalizeStructColons(code)
+	code = normalizeOperators(code)
+	code = normalizeEqualSign(code)
+	code = strings.TrimRight(code, " \t")
+
+	if comment != "" {
+		comment = normalizeComment(comment)
+	}
+	return code + comment
+}
+
+// splitComment splits a line into its code part and trailing comment (including the #).
+// Handles # inside strings correctly.
+func splitComment(line string) (code, comment string) {
+	inStr := false
+	interp := 0
+	runes := []rune(line)
+	for i, c := range runes {
+		if inStr {
+			if c == '\\' {
+				continue // next rune is escaped, handled by index advance
 			}
-			prevWasBlank = true
+			if c == '#' && interp == 0 && i+1 < len(runes) && runes[i+1] == '{' {
+				interp++
+				continue
+			}
+			if c == '}' && interp > 0 {
+				interp--
+				continue
+			}
+			if c == '"' && interp == 0 {
+				inStr = false
+			}
 			continue
 		}
-		prevWasBlank = false
-
-		// Determine first token
-		firstWord := firstToken(trimmed)
-
-		// Insert blank line before top-level declarations (not the very first)
-		if topLevelStarters[firstWord] && len(out) > 0 && prevWasTopLevel {
-			// already have blank line or not — ensure exactly one
-			if len(out) > 0 && out[len(out)-1] != "" {
-				out = append(out, "")
-			}
+		if c == '"' {
+			inStr = true
+			continue
 		}
-
-		// Adjust depth before writing for closers
-		if blockClosers[firstWord] {
-			depth--
-			if depth < 0 {
-				depth = 0
-			}
+		if c == '#' {
+			return string(runes[:i]), string(runes[i:])
 		}
-		if blockMiddle[firstWord] && depth > 0 {
-			depth--
-		}
-
-		// Build indented line
-		indent := strings.Repeat("  ", depth)
-		formatted := indent + normalizeSpacing(trimmed)
-		out = append(out, formatted)
-
-		// Adjust depth after writing for openers
-		if blockOpeners[firstWord] {
-			depth++
-		}
-		// enum uses { } not do/end
-		if firstWord == "enum" {
-			// don't change depth — enum body is on one line typically
-		}
-		if blockMiddle[firstWord] {
-			depth++
-		}
-
-		prevWasTopLevel = topLevelStarters[firstWord]
 	}
-
-	// Remove trailing blank lines
-	for len(out) > 0 && out[len(out)-1] == "" {
-		out = out[:len(out)-1]
-	}
-
-	return strings.Join(out, "\n") + "\n"
+	return line, ""
 }
 
-// normalizeSpacing fixes spacing around :: and = operators.
-func normalizeSpacing(line string) string {
-	// Normalize :: spacing: collapse multiple spaces around ::
-	line = normalizeOp(line, "::", " :: ")
-	// Normalize = spacing (but not ==, !=, <=, >=, ->)
-	line = normalizeEq(line)
-	// Strip trailing whitespace
-	line = strings.TrimRight(line, " \t")
-	return line
+// normalizeComment ensures exactly one space after # (but not #! or ##).
+func normalizeComment(c string) string {
+	if len(c) < 2 {
+		return c
+	}
+	// "#!" and "##" stay as-is
+	if c[1] == '!' || c[1] == '#' {
+		return c
+	}
+	// Already has space
+	if c[1] == ' ' {
+		return strings.TrimRight(c, " \t")
+	}
+	return "# " + strings.TrimRight(c[1:], " \t")
 }
 
-// normalizeOp ensures `op` is surrounded by exactly one space on each side.
-func normalizeOp(line, op, replacement string) string {
-	// Simple approach: split on op, trim each part, rejoin
-	parts := strings.Split(line, op)
+// normalizeColonColonSpacing ensures exactly one space around ::.
+func normalizeColonColonSpacing(line string) string {
+	parts := strings.Split(line, "::")
 	if len(parts) <= 1 {
 		return line
 	}
@@ -121,11 +120,168 @@ func normalizeOp(line, op, replacement string) string {
 			parts[i] = strings.TrimLeft(parts[i], " \t")
 		}
 	}
-	return strings.Join(parts, replacement)
+	return strings.Join(parts, " :: ")
 }
 
-// normalizeEq normalizes standalone `=` (not ==, !=, <=, >=, ->, =>).
-func normalizeEq(line string) string {
+// normalizeCommas ensures exactly one space after each comma (not inside strings).
+func normalizeCommas(line string) string {
+	var sb strings.Builder
+	runes := []rune(line)
+	inStr := false
+	for i := 0; i < len(runes); i++ {
+		c := runes[i]
+		if c == '"' {
+			inStr = !inStr
+		}
+		if !inStr && c == ',' {
+			sb.WriteRune(',')
+			// Skip existing spaces after comma, then write exactly one
+			j := i + 1
+			for j < len(runes) && runes[j] == ' ' {
+				j++
+			}
+			if j < len(runes) && runes[j] != '\n' {
+				sb.WriteRune(' ')
+			}
+			i = j - 1
+			continue
+		}
+		// Remove space before comma
+		if !inStr && c == ' ' && i+1 < len(runes) && runes[i+1] == ',' {
+			continue
+		}
+		sb.WriteRune(c)
+	}
+	return sb.String()
+}
+
+// normalizeStructColons ensures a space after : in struct literal fields (key: value).
+// e.g. {x:1.0, y:2.0} → {x: 1.0, y: 2.0}
+func normalizeStructColons(line string) string {
+	var sb strings.Builder
+	runes := []rune(line)
+	inStr := false
+	for i := 0; i < len(runes); i++ {
+		c := runes[i]
+		if c == '"' {
+			inStr = !inStr
+		}
+		if !inStr && c == ':' {
+			// Skip :: (already handled) and ->
+			if i+1 < len(runes) && (runes[i+1] == ':' || runes[i+1] == '-' || runes[i+1] == ')') {
+				sb.WriteRune(c)
+				continue
+			}
+			// Must be preceded by a word character (struct key)
+			if i > 0 && (unicode.IsLetter(runes[i-1]) || unicode.IsDigit(runes[i-1]) || runes[i-1] == '_') {
+				sb.WriteRune(':')
+				// Ensure space after
+				if i+1 < len(runes) && runes[i+1] != ' ' {
+					sb.WriteRune(' ')
+				}
+				continue
+			}
+		}
+		sb.WriteRune(c)
+	}
+	return sb.String()
+}
+
+// normalizeOperators spaces binary operators: + - * / == != <= >= < > and or
+func normalizeOperators(line string) string {
+	var sb strings.Builder
+	runes := []rune(line)
+	n := len(runes)
+	inStr := false
+
+	for i := 0; i < n; i++ {
+		c := runes[i]
+
+		if c == '"' {
+			inStr = !inStr
+			sb.WriteRune(c)
+			continue
+		}
+		if inStr {
+			sb.WriteRune(c)
+			continue
+		}
+
+		// Two-character operators: == != <= >= ->
+		if i+1 < n {
+			two := string(runes[i : i+2])
+			switch two {
+			case "==", "!=", "<=", ">=", "->":
+				ensureSpaceInBuilder(&sb)
+				sb.WriteString(two)
+				ensureSpaceAfter(&sb, runes, i+2)
+				i++
+				continue
+			}
+		}
+
+		// Single-char binary operators: + * /
+		// (- handled separately for unary vs binary)
+		switch c {
+		case '+', '*', '/':
+			// Skip * in 0x hex literals: look back for 0x
+			if c == '*' {
+				// unlikely but safe
+			}
+			ensureSpaceInBuilder(&sb)
+			sb.WriteRune(c)
+			ensureSpaceAfterRune(&sb, runes, i+1)
+			continue
+
+		case '-':
+			// Binary minus: preceded by alnum, ), ], @, or closing quote
+			if isBinaryContext(sb.String()) {
+				ensureSpaceInBuilder(&sb)
+				sb.WriteRune('-')
+				ensureSpaceAfterRune(&sb, runes, i+1)
+				continue
+			}
+			sb.WriteRune(c)
+			continue
+		}
+
+		sb.WriteRune(c)
+	}
+	return sb.String()
+}
+
+// isBinaryContext returns true if the character before an operator makes it binary.
+func isBinaryContext(before string) bool {
+	if before == "" {
+		return false
+	}
+	last := rune(before[len(before)-1])
+	return unicode.IsLetter(last) || unicode.IsDigit(last) ||
+		last == ')' || last == ']' || last == '_' || last == '"' || last == '@'
+}
+
+// ensureSpaceInBuilder adds a space to sb if the last char isn't already a space.
+func ensureSpaceInBuilder(sb *strings.Builder) {
+	s := sb.String()
+	if len(s) > 0 && s[len(s)-1] != ' ' {
+		sb.WriteRune(' ')
+	}
+}
+
+// ensureSpaceAfter ensures runes[idx] is preceded by a space in sb.
+func ensureSpaceAfter(sb *strings.Builder, runes []rune, idx int) {
+	if idx < len(runes) && runes[idx] != ' ' && runes[idx] != '\t' {
+		sb.WriteRune(' ')
+	}
+}
+
+// ensureSpaceAfterRune is ensureSpaceAfter for single index.
+func ensureSpaceAfterRune(sb *strings.Builder, runes []rune, idx int) {
+	ensureSpaceAfter(sb, runes, idx)
+}
+
+// normalizeEqualSign ensures spaces around standalone = (not ==, !=, <=, >=, ->, =>).
+func normalizeEqualSign(line string) string {
 	var sb strings.Builder
 	runes := []rune(line)
 	inStr := false
@@ -154,13 +310,8 @@ func normalizeEq(line string) string {
 				sb.WriteRune(c)
 				continue
 			}
-			// Ensure space before =
-			s := sb.String()
-			if len(s) > 0 && s[len(s)-1] != ' ' {
-				sb.WriteRune(' ')
-			}
+			ensureSpaceInBuilder(&sb)
 			sb.WriteRune('=')
-			// Ensure space after =
 			if next != 0 && next != ' ' && next != '\t' {
 				sb.WriteRune(' ')
 			}
@@ -171,7 +322,127 @@ func normalizeEq(line string) string {
 	return sb.String()
 }
 
-// firstToken returns the first whitespace-delimited token of a line.
+// ---- Pass 2: re-indentation ------------------------------------------------
+
+func reindent(lines []string) []string {
+	var out []string
+	depth := 0
+	prevWasBlank := false
+
+	topLevel := map[string]bool{
+		"def": true, "defp": true, "defstruct": true, "enum": true,
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if trimmed == "" {
+			if !prevWasBlank {
+				out = append(out, "")
+			}
+			prevWasBlank = true
+			continue
+		}
+		prevWasBlank = false
+
+		fw := firstToken(trimmed)
+
+		// Blank line before top-level declarations
+		if topLevel[fw] && len(out) > 0 && out[len(out)-1] != "" {
+			out = append(out, "")
+		}
+
+		// Dedent before writing end
+		if fw == "end" {
+			depth--
+			if depth < 0 {
+				depth = 0
+			}
+		}
+		// else: dedent, write, re-indent
+		if fw == "else" && depth > 0 {
+			depth--
+		}
+
+		out = append(out, strings.Repeat("  ", depth)+trimmed)
+
+		// Indent after any line ending with " do"
+		if strings.HasSuffix(trimmed, " do") || trimmed == "do" {
+			depth++
+		}
+		if fw == "else" {
+			depth++
+		}
+	}
+	return out
+}
+
+// ---- Pass 3: @attr alignment -----------------------------------------------
+
+// attrLineRe matches lines like: (indent) @name :: lifetime = value
+var attrLineRe = regexp.MustCompile(`^(\s*)(@\w+)\s*::\s*(\w+)\s*=\s*(.*)$`)
+
+// alignAttrBlocks finds consecutive @attr declaration groups and aligns :: and =.
+func alignAttrBlocks(lines []string) []string {
+	out := make([]string, len(lines))
+	copy(out, lines)
+
+	i := 0
+	for i < len(out) {
+		// Find start of a group
+		if !attrLineRe.MatchString(out[i]) {
+			i++
+			continue
+		}
+		// Find end of group
+		j := i
+		for j < len(out) && attrLineRe.MatchString(out[j]) {
+			j++
+		}
+		if j-i >= 2 {
+			alignGroup(out, i, j)
+		}
+		i = j
+	}
+	return out
+}
+
+func alignGroup(lines []string, start, end int) {
+	type parsed struct {
+		indent, name, lifetime, value string
+	}
+	parts := make([]parsed, end-start)
+	maxName, maxLifetime := 0, 0
+
+	for i, l := range lines[start:end] {
+		m := attrLineRe.FindStringSubmatch(l)
+		parts[i] = parsed{m[1], m[2], m[3], m[4]}
+		if len(m[2]) > maxName {
+			maxName = len(m[2])
+		}
+		if len(m[3]) > maxLifetime {
+			maxLifetime = len(m[3])
+		}
+	}
+
+	for i, p := range parts {
+		namePad := strings.Repeat(" ", maxName-len(p.name))
+		lifePad := strings.Repeat(" ", maxLifetime-len(p.lifetime))
+		lines[start+i] = p.indent + p.name + namePad + " :: " + p.lifetime + lifePad + " = " + p.value
+	}
+}
+
+// ---- Finalize --------------------------------------------------------------
+
+func finalize(lines []string) string {
+	// Strip trailing blank lines
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// firstToken returns the first whitespace-delimited token of a trimmed line.
 func firstToken(line string) string {
 	trimmed := strings.TrimSpace(line)
 	idx := strings.IndexAny(trimmed, " \t(")
