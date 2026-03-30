@@ -1,0 +1,66 @@
+defstruct Bullet do
+  x      :: float = 0.0
+  y      :: float = 0.0
+  vx     :: float = 0.0
+  vy     :: float = 0.0
+  active :: int   = 0
+end
+
+@bullets    :: script = array_fixed(128, Bullet{})
+@player_x   :: script = 400.0
+@player_y   :: script = 500.0
+@fire_timer :: script = 0.0
+
+defp spawn_bullet(x :: float, y :: float, vx :: float, vy :: float) do
+  i = 0
+  while i < @bullets.len do
+    b = @bullets.get(i)
+    if b.active == 0 do
+      @bullets.set(i, b with { x: x, y: y, vx: vx, vy: vy, active: 1 })
+      return 0
+    end
+    i = i + 1
+  end
+  return 0
+end
+
+defp update_bullets(dt :: float) do
+  i = 0
+  while i < @bullets.len do
+    b = @bullets.get(i)
+    if b.active == 1 do
+      b = b with { x: b.x + b.vx * dt, y: b.y + b.vy * dt }
+      if b.y < 0.0 do
+        b = b with { active: 0 }
+      end
+      @bullets.set(i, b)
+    end
+    i = i + 1
+  end
+end
+
+def on_tick(dt :: float) do
+  if key_down(:left)  do @player_x = @player_x - 300.0 * dt end
+  if key_down(:right) do @player_x = @player_x + 300.0 * dt end
+
+  @fire_timer = @fire_timer - dt
+  if key_down(:space) and @fire_timer <= 0.0 do
+    spawn_bullet(@player_x, @player_y, 0.0, -600.0)
+    @fire_timer = 0.1
+  end
+
+  update_bullets(dt)
+end
+
+def on_draw() do
+  clear_background(0x101018ff)
+  draw_rectangle(@player_x - 12.0, @player_y - 8.0, 24.0, 16.0, 0x44aaffff)
+  i = 0
+  while i < @bullets.len do
+    b = @bullets.get(i)
+    if b.active == 1 do
+      draw_rectangle(b.x - 3.0, b.y - 6.0, 6.0, 12.0, 0xffff00ff)
+    end
+    i = i + 1
+  end
+end

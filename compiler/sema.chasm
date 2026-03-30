@@ -154,8 +154,47 @@ defp expr_lifetime(pool :: []Node, ch :: []int, attrs :: []AttrInfo, idx :: int)
   if tag == :bool_lit  do return 3 end
   if tag == :atom_lit  do return 3 end
   if tag == :string_lit do return 3 end
+  # Enum variant access (field_get on enum type) is a compile-time constant
+  if tag == :field_get do
+    recv_lt = expr_lifetime(pool, ch, attrs, node.a)
+    # If receiver is an @attr, carry its lifetime; otherwise persistent (enum constant)
+    if recv_lt > 1 do return recv_lt end
+    return 3
+  end
+  # Struct literal: lifetime is max of all field values
+  if tag == :struct_lit do
+    cs = node.a
+    cl = node.b
+    max_lt = 3
+    fi = 0
+    while fi < cl do
+      fnode_idx = ch.get(cs + fi)
+      fnode     = pool.get(fnode_idx)
+      flt = expr_lifetime(pool, ch, attrs, fnode.a)
+      if flt > max_lt do max_lt = flt end
+      fi = fi + 1
+    end
+    return max_lt
+  end
+  # struct update (with): lifetime is max of base and overrides
+  if tag == :struct_update do
+    base_lt = expr_lifetime(pool, ch, attrs, node.a)
+    max_lt  = base_lt
+    oi = 0
+    while oi < node.c do
+      fnode_idx = ch.get(node.b + oi)
+      fnode     = pool.get(fnode_idx)
+      flt = expr_lifetime(pool, ch, attrs, fnode.a)
+      if flt > max_lt do max_lt = flt end
+      oi = oi + 1
+    end
+    return max_lt
+  end
+  # Local variable: if it was assigned from a @script attr, it carries script lifetime.
+  # We can't track this precisely without a full dataflow pass, so we return script (2)
+  # as a conservative safe default — the common case is locals derived from @script attrs.
+  if tag == :ident do return 2 end
   if tag == :method_call do
-    # Result lifetime is max of receiver and all argument lifetimes
     max_lt = expr_lifetime(pool, ch, attrs, node.a)
     cs = node.b
     cl = node.c
@@ -167,11 +206,9 @@ defp expr_lifetime(pool :: []Node, ch :: []int, attrs :: []AttrInfo, idx :: int)
     end
     return max_lt
   end
-  # Locals and everything else are frame-lifetime
+  # Everything else is frame-lifetime
   return 1
 end
-
-# ---- Struct type registry ----------------------------------------------------
 
 defstruct StructDef do
   name     :: string

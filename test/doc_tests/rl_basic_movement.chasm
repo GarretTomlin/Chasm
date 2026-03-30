@@ -1,0 +1,19 @@
+@player_x :: script = 400.0
+@player_y :: script = 300.0
+@speed    :: script = 200.0
+
+def on_init() do
+end
+
+def on_tick(dt :: float) do
+  if key_down(:right) do @player_x = @player_x + @speed * dt end
+  if key_down(:left)  do @player_x = @player_x - @speed * dt end
+  if key_down(:down)  do @player_y = @player_y + @speed * dt end
+  if key_down(:up)    do @player_y = @player_y - @speed * dt end
+end
+
+def on_draw() do
+  clear_background(0x181820ff)
+  draw_rectangle(@player_x - 16.0, @player_y - 16.0, 32.0, 32.0, 0x4488ffff)
+  draw_text("Move with arrow keys", 10, 10, 20, 0xffffffff)
+end
