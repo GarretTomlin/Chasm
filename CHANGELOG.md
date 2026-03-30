@@ -1,5 +1,44 @@
 # Changelog
 
+## [1.9.2] — 2026-03-30 — Ruby-style formatter
+
+### Summary
+
+`chasm fmt` and the LSP formatter (used by the VS Code extension) now produce Ruby-style output. Both use the same multi-pass architecture — the previous simple version only handled indentation.
+
+### Changes
+
+- **feat(fmt)**: operator spacing — spaces around `+`, `-`, `*`, `/`, `==`, `!=`, `<=`, `>=`, `->` (unary `-` detected by context)
+- **feat(fmt)**: comma spacing — exactly one space after each `,`
+- **feat(fmt)**: struct colon spacing — `{x:1.0}` → `{x: 1.0}`
+- **feat(fmt)**: `::` spacing — exactly one space on each side
+- **feat(fmt)**: `=` spacing — spaces around standalone `=`, skips `==`, `!=`, `<=`, `>=`, `->`
+- **feat(fmt)**: comment normalization — `#foo` → `# foo`, `##` and `#!` left as-is
+- **feat(fmt)**: `@attr` block alignment — consecutive `@name :: lifetime = value` lines get `::` and `=` columns aligned
+- **refactor(fmt)**: CLI `formatSource` and LSP `formatDocument` now share the same multi-pass design (normalize → re-indent → align → finalize)
+- **chore**: CLI version bumped to `1.9.2`
+
+---
+
+## [1.9.1] — 2026-03-30 — key_code, chasm update, doc fixes
+
+### Summary
+
+`key_code(:right)` now works correctly — atoms are `const char*` but `key_down` expects an integer, so `key_code` translates atom names to Raylib key constants. Adds `chasm update` CLI command for self-updating. All doc examples audited for correct engine context.
+
+### Changes
+
+- **feat(raylib)**: `key_code(name: str) -> int` added — maps atom names (`"right"`, `"left"`, `"space"`, `"enter"`, a–z, 0–9, f1–f12, modifiers) to Raylib key constants
+- **fix(raylib)**: `chasm_clear_background`, `chasm_draw_rectangle`, `chasm_draw_circle_v`, `chasm_screen_width`, `chasm_screen_height` added to `chasm_rl_exports.c` — these aliases were declared in `raylib.chasm` but not exported, causing dlopen failures
+- **feat(cli)**: `chasm update` command — re-runs the install script (`install.sh` on macOS/Linux, `install.ps1` on Windows) to update to the latest version
+- **docs**: all code examples using `on_tick`/`on_draw` now include engine context notes; standalone examples do not use engine-only lifecycle hooks
+- **docs**: `key_down(key_code(:right))` replaces bare `key_down(262)` and incorrect `key_down(:right)` throughout
+- **docs**: game-loop page clearly marks `on_tick`/`on_draw` as required, `on_init`/`on_unload`/`on_reload_migrate` as optional
+- **docs**: landing page updated — `key_code()` in hero example, install command component, coming-soon engine placeholders
+- **chore**: CLI version bumped to `1.9.1`
+
+---
+
 ## [1.9.0] — 2026-03-30 — Enum fixes, raylib aliases, doc audit
 
 ### Summary
