@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.9.6] — 2026-03-30 — Compiler refactor
+
+### Summary
+
+Major code quality pass on the self-hosted compiler. Monolithic functions broken into focused helpers, magic type ID numbers replaced with named constants. Fixpoint verified: compiler output is identical before and after.
+
+### Changes
+
+- **refactor(compiler)**: `@TID_INT`, `@TID_FLOAT`, `@TID_BOOL`, `@TID_STRING`, `@TID_ATOM`, `@TID_VOID`, `@TID_ARRAY`, `@TID_STRBUILD`, `@TID_TUPLE` constants added to `sema.chasm` and `codegen.chasm` — all raw type ID magic numbers replaced
+- **refactor(codegen)**: `emit_expr` reduced from 657 → 181 lines by extracting `emit_expr_call`, `emit_expr_method_call`, `emit_expr_struct_lit`, `emit_expr_struct_update`, `emit_expr_match`, `emit_expr_pipe`, `emit_expr_interp`, `emit_expr_tuple_lit`, `emit_expr_if_value`
+- **refactor(codegen)**: `populate_attr_var_elems` extracted to eliminate duplicated `@attr` pre-population loop in `emit_fn` and `chasm_main`
+- **refactor(parser)**: `parse_primary` reduced from 389 → 107 lines by extracting `parse_string_interp`, `parse_primary_ident`, `parse_primary_match`, `parse_primary_case`
+- **refactor(sema)**: `sema_expr` reduced from 450 → 394 lines by extracting `sema_expr_match`, `sema_expr_pipe`, `sema_expr_tuple`, `sema_expr_struct_lit`, `sema_expr_struct_update` (diagnostic-emitting branches kept inline)
+- **chore**: CLI version bumped to `1.9.6`
+
+---
+
 ## [1.9.5] — 2026-03-30 — LSP diagnostics stuck fix
 
 ### Summary
