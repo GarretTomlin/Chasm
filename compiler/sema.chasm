@@ -1,5 +1,17 @@
 # Bootstrap Chasm compiler — semantic analysis and type inference.
 
+# ---- Type ID named constants -------------------------------------------------
+@TID_UNKNOWN  :: persistent = 0
+@TID_INT      :: persistent = 1
+@TID_FLOAT    :: persistent = 2
+@TID_BOOL     :: persistent = 3
+@TID_STRING   :: persistent = 4
+@TID_ATOM     :: persistent = 5
+@TID_VOID     :: persistent = 6
+@TID_ARRAY    :: persistent = 7
+@TID_STRBUILD :: persistent = 8
+@TID_TUPLE    :: persistent = 9
+
 # ---- Symbol table ------------------------------------------------------------
 # Pre-allocated flat array; sym_len tracks the logical size.
 # Ints are passed by value, so callers own their sym_len.
@@ -31,7 +43,7 @@ defp sym_lookup(syms :: []Sym, sym_len :: int, name :: string) :: int do
     end
     i = i - 1
   end
-  return 0
+  return @TID_UNKNOWN
 end
 
 defp sym_elem_lookup(syms :: []Sym, sym_len :: int, name :: string) :: int do
@@ -43,7 +55,7 @@ defp sym_elem_lookup(syms :: []Sym, sym_len :: int, name :: string) :: int do
     end
     i = i - 1
   end
-  return 0
+  return @TID_UNKNOWN
 end
 
 defp sym_contains(syms :: []Sym, sym_len :: int, name :: string) :: bool do
@@ -83,7 +95,7 @@ defp fnsig_lookup(fns :: []FnSig, name :: string) :: int do
     end
     i = i + 1
   end
-  return 0
+  return @TID_UNKNOWN
 end
 
 # ---- AttrInfo: per-@attr lifetime and type info ------------------------------
@@ -225,7 +237,7 @@ defp struct_lookup_tid(structs :: []StructDef, name :: string) :: int do
     end
     i = i + 1
   end
-  return 0
+  return @TID_UNKNOWN
 end
 
 # ---- Field type registry -----------------------------------------------------
@@ -246,26 +258,26 @@ defp field_lookup(fields :: []FieldDef, struct_tid :: int, name :: string) :: in
     end
     i = i + 1
   end
-  return 0
+  return @TID_UNKNOWN
 end
 
 # ---- Type resolution from name string ----------------------------------------
 
 defp resolve_type(name :: string, structs :: []StructDef) :: int do
-  if name == "int"      do return 1 end
-  if name == "float"    do return 2 end
-  if name == "f32"      do return 2 end
-  if name == "f64"      do return 2 end
-  if name == "bool"     do return 3 end
-  if name == "string"   do return 4 end
-  if name == "str"      do return 4 end
-  if name == "atom"     do return 5 end
-  if name == "void"     do return 6 end
-  if name == "strbuild" do return 8 end
+  if name == "int"      do return @TID_INT      end
+  if name == "float"    do return @TID_FLOAT    end
+  if name == "f32"      do return @TID_FLOAT    end
+  if name == "f64"      do return @TID_FLOAT    end
+  if name == "bool"     do return @TID_BOOL     end
+  if name == "string"   do return @TID_STRING   end
+  if name == "str"      do return @TID_STRING   end
+  if name == "atom"     do return @TID_ATOM     end
+  if name == "void"     do return @TID_VOID     end
+  if name == "strbuild" do return @TID_STRBUILD end
   # Array type: starts with "[]"
   if str_len(name) >= 2 do
     if str_slice(name, 0, 2) == "[]" do
-      return 7
+      return @TID_ARRAY
     end
   end
   # User-defined struct
@@ -276,121 +288,121 @@ end
 
 defp builtin_ret(name :: string) :: int do
   # string-returning
-  if name == "str_concat"        do return 4 end
-  if name == "str_slice"         do return 4 end
-  if name == "str_repeat"        do return 4 end
-  if name == "str_from_char"     do return 4 end
-  if name == "str_upper"         do return 4 end
-  if name == "str_lower"         do return 4 end
-  if name == "str_trim"          do return 4 end
-  if name == "int_to_str"        do return 4 end
-  if name == "float_to_str"      do return 4 end
-  if name == "bool_to_str"       do return 4 end
-  if name == "atom_to_str"       do return 4 end
-  if name == "file_read"         do return 4 end
-  if name == "getenv"            do return 4 end
-  if name == "str_builder_build" do return 4 end
-  if name == "str_format"        do return 4 end
+  if name == "str_concat"        do return @TID_STRING end
+  if name == "str_slice"         do return @TID_STRING end
+  if name == "str_repeat"        do return @TID_STRING end
+  if name == "str_from_char"     do return @TID_STRING end
+  if name == "str_upper"         do return @TID_STRING end
+  if name == "str_lower"         do return @TID_STRING end
+  if name == "str_trim"          do return @TID_STRING end
+  if name == "int_to_str"        do return @TID_STRING end
+  if name == "float_to_str"      do return @TID_STRING end
+  if name == "bool_to_str"       do return @TID_STRING end
+  if name == "atom_to_str"       do return @TID_STRING end
+  if name == "file_read"         do return @TID_STRING end
+  if name == "getenv"            do return @TID_STRING end
+  if name == "str_builder_build" do return @TID_STRING end
+  if name == "str_format"        do return @TID_STRING end
   # strbuild-returning
-  if name == "str_builder_new"   do return 8 end
+  if name == "str_builder_new"   do return @TID_STRBUILD end
   # int-returning
-  if name == "str_len"         do return 1 end
-  if name == "str_char_at"     do return 1 end
-  if name == "str_to_int"      do return 1 end
-  if name == "str_index_of"    do return 1 end
-  if name == "time_ms"         do return 1 end
-  if name == "rand_int"        do return 1 end
+  if name == "str_len"         do return @TID_INT end
+  if name == "str_char_at"     do return @TID_INT end
+  if name == "str_to_int"      do return @TID_INT end
+  if name == "str_index_of"    do return @TID_INT end
+  if name == "time_ms"         do return @TID_INT end
+  if name == "rand_int"        do return @TID_INT end
   # bool-returning
-  if name == "str_contains"    do return 3 end
-  if name == "str_starts_with" do return 3 end
-  if name == "str_ends_with"   do return 3 end
-  if name == "str_eq"          do return 3 end
-  if name == "file_exists"     do return 3 end
+  if name == "str_contains"    do return @TID_BOOL end
+  if name == "str_starts_with" do return @TID_BOOL end
+  if name == "str_ends_with"   do return @TID_BOOL end
+  if name == "str_eq"          do return @TID_BOOL end
+  if name == "file_exists"     do return @TID_BOOL end
   # float-returning
-  if name == "time_now"        do return 2 end
-  if name == "rand"            do return 2 end
-  if name == "rand_range"      do return 2 end
-  if name == "abs"             do return 2 end
-  if name == "sqrt"            do return 2 end
-  if name == "sin"             do return 2 end
-  if name == "cos"             do return 2 end
-  if name == "tan"             do return 2 end
-  if name == "atan2"           do return 2 end
-  if name == "floor"           do return 2 end
-  if name == "ceil"            do return 2 end
-  if name == "round"           do return 2 end
-  if name == "min"             do return 2 end
-  if name == "max"             do return 2 end
-  if name == "clamp"           do return 2 end
-  if name == "lerp"            do return 2 end
-  if name == "scale"           do return 2 end
-  if name == "deg_to_rad"      do return 2 end
-  if name == "rad_to_deg"      do return 2 end
-  if name == "sign"            do return 2 end
-  if name == "fract"           do return 2 end
-  if name == "wrap"            do return 2 end
-  if name == "snap"            do return 2 end
-  if name == "pow"             do return 2 end
-  if name == "smooth_step"     do return 2 end
-  if name == "smoother_step"   do return 2 end
-  if name == "ping_pong"       do return 2 end
-  if name == "move_toward"     do return 2 end
-  if name == "angle_diff"      do return 2 end
-  if name == "to_float"        do return 2 end
-  if name == "vec2_len"        do return 2 end
-  if name == "vec2_dot"        do return 2 end
-  if name == "vec2_dist"       do return 2 end
-  if name == "vec2_angle"      do return 2 end
-  if name == "vec2_cross"      do return 2 end
-  if name == "vec2_norm_x"     do return 2 end
-  if name == "vec2_norm_y"     do return 2 end
+  if name == "time_now"        do return @TID_FLOAT end
+  if name == "rand"            do return @TID_FLOAT end
+  if name == "rand_range"      do return @TID_FLOAT end
+  if name == "abs"             do return @TID_FLOAT end
+  if name == "sqrt"            do return @TID_FLOAT end
+  if name == "sin"             do return @TID_FLOAT end
+  if name == "cos"             do return @TID_FLOAT end
+  if name == "tan"             do return @TID_FLOAT end
+  if name == "atan2"           do return @TID_FLOAT end
+  if name == "floor"           do return @TID_FLOAT end
+  if name == "ceil"            do return @TID_FLOAT end
+  if name == "round"           do return @TID_FLOAT end
+  if name == "min"             do return @TID_FLOAT end
+  if name == "max"             do return @TID_FLOAT end
+  if name == "clamp"           do return @TID_FLOAT end
+  if name == "lerp"            do return @TID_FLOAT end
+  if name == "scale"           do return @TID_FLOAT end
+  if name == "deg_to_rad"      do return @TID_FLOAT end
+  if name == "rad_to_deg"      do return @TID_FLOAT end
+  if name == "sign"            do return @TID_FLOAT end
+  if name == "fract"           do return @TID_FLOAT end
+  if name == "wrap"            do return @TID_FLOAT end
+  if name == "snap"            do return @TID_FLOAT end
+  if name == "pow"             do return @TID_FLOAT end
+  if name == "smooth_step"     do return @TID_FLOAT end
+  if name == "smoother_step"   do return @TID_FLOAT end
+  if name == "ping_pong"       do return @TID_FLOAT end
+  if name == "move_toward"     do return @TID_FLOAT end
+  if name == "angle_diff"      do return @TID_FLOAT end
+  if name == "to_float"        do return @TID_FLOAT end
+  if name == "vec2_len"        do return @TID_FLOAT end
+  if name == "vec2_dot"        do return @TID_FLOAT end
+  if name == "vec2_dist"       do return @TID_FLOAT end
+  if name == "vec2_angle"      do return @TID_FLOAT end
+  if name == "vec2_cross"      do return @TID_FLOAT end
+  if name == "vec2_norm_x"     do return @TID_FLOAT end
+  if name == "vec2_norm_y"     do return @TID_FLOAT end
   # int-returning (type conversions + color)
-  if name == "to_int"          do return 1 end
-  if name == "rgb"             do return 1 end
-  if name == "rgba"            do return 1 end
-  if name == "color_r"         do return 1 end
-  if name == "color_g"         do return 1 end
-  if name == "color_b"         do return 1 end
-  if name == "color_a"         do return 1 end
-  if name == "color_lerp"      do return 1 end
-  if name == "color_mix"       do return 1 end
-  if name == "bit_and"         do return 1 end
-  if name == "bit_or"          do return 1 end
-  if name == "bit_xor"         do return 1 end
-  if name == "bit_not"         do return 1 end
-  if name == "bit_shl"         do return 1 end
-  if name == "bit_shr"         do return 1 end
+  if name == "to_int"          do return @TID_INT end
+  if name == "rgb"             do return @TID_INT end
+  if name == "rgba"            do return @TID_INT end
+  if name == "color_r"         do return @TID_INT end
+  if name == "color_g"         do return @TID_INT end
+  if name == "color_b"         do return @TID_INT end
+  if name == "color_a"         do return @TID_INT end
+  if name == "color_lerp"      do return @TID_INT end
+  if name == "color_mix"       do return @TID_INT end
+  if name == "bit_and"         do return @TID_INT end
+  if name == "bit_or"          do return @TID_INT end
+  if name == "bit_xor"         do return @TID_INT end
+  if name == "bit_not"         do return @TID_INT end
+  if name == "bit_shl"         do return @TID_INT end
+  if name == "bit_shr"         do return @TID_INT end
   # bool-returning (type conversion)
-  if name == "to_bool"         do return 3 end
+  if name == "to_bool"         do return @TID_BOOL end
   # array-returning
-  if name == "array_new"       do return 7 end
-  if name == "array_fixed"     do return 7 end
-  # promotion functions — passthrough; we return 1 to suppress E005 (type is arg-dependent)
-  if name == "copy_to_script"  do return 1 end
-  if name == "persist_copy"    do return 1 end
+  if name == "array_new"       do return @TID_ARRAY end
+  if name == "array_fixed"     do return @TID_ARRAY end
+  # promotion functions — passthrough; we return TID_INT to suppress E005 (type is arg-dependent)
+  if name == "copy_to_script"  do return @TID_INT end
+  if name == "persist_copy"    do return @TID_INT end
   # void
-  if name == "print"           do return 6 end
-  if name == "eprint"          do return 6 end
-  if name == "log"             do return 6 end
-  if name == "exit"            do return 6 end
-  if name == "assert"          do return 6 end
-  if name == "assert_eq"       do return 6 end
-  if name == "todo"            do return 6 end
-  if name == "file_write"      do return 6 end
-  if name == "str_builder_push"   do return 6 end
-  if name == "str_builder_append" do return 6 end
+  if name == "print"           do return @TID_VOID end
+  if name == "eprint"          do return @TID_VOID end
+  if name == "log"             do return @TID_VOID end
+  if name == "exit"            do return @TID_VOID end
+  if name == "assert"          do return @TID_VOID end
+  if name == "assert_eq"       do return @TID_VOID end
+  if name == "todo"            do return @TID_VOID end
+  if name == "file_write"      do return @TID_VOID end
+  if name == "str_builder_push"   do return @TID_VOID end
+  if name == "str_builder_append" do return @TID_VOID end
   # easing functions
-  if name == "ease_in"          do return 2 end
-  if name == "ease_out"         do return 2 end
-  if name == "ease_in_out"      do return 2 end
-  if name == "ease_in_cubic"    do return 2 end
-  if name == "ease_out_cubic"   do return 2 end
-  if name == "ease_in_out_cubic" do return 2 end
-  if name == "ease_out_bounce"  do return 2 end
-  if name == "ease_in_bounce"   do return 2 end
-  if name == "ease_in_elastic"  do return 2 end
-  if name == "ease_out_elastic" do return 2 end
-  return 0
+  if name == "ease_in"          do return @TID_FLOAT end
+  if name == "ease_out"         do return @TID_FLOAT end
+  if name == "ease_in_out"      do return @TID_FLOAT end
+  if name == "ease_in_cubic"    do return @TID_FLOAT end
+  if name == "ease_out_cubic"   do return @TID_FLOAT end
+  if name == "ease_in_out_cubic" do return @TID_FLOAT end
+  if name == "ease_out_bounce"  do return @TID_FLOAT end
+  if name == "ease_in_bounce"   do return @TID_FLOAT end
+  if name == "ease_in_elastic"  do return @TID_FLOAT end
+  if name == "ease_out_elastic" do return @TID_FLOAT end
+  return @TID_UNKNOWN
 end
 
 # ---- Decode fn_decl name "funcname::rettype" ---------------------------------
@@ -413,12 +425,12 @@ defp fn_split_ret(full_name :: string, structs :: []StructDef) :: int do
   while i < n do
     if str_char_at(full_name, i) == 58 and i + 1 < n and str_char_at(full_name, i + 1) == 58 do
       type_str = str_slice(full_name, i + 2, n)
-      if str_len(type_str) == 0 do return 6 end  # no return type → void
+      if str_len(type_str) == 0 do return @TID_VOID end  # no return type → void
       return resolve_type(type_str, structs)
     end
     i = i + 1
   end
-  return 6  # no "::" annotation → function is void
+  return @TID_VOID  # no "::" annotation → function is void
 end
 
 # ---- Pass 0: collect struct type IDs (returns []StructDef) ------------------
@@ -496,6 +508,109 @@ defp collect_fn_list(pool :: []Node, ch :: []int, root :: int, structs :: []Stru
   return result
 end
 
+# ---- Pass 2: sema_expr helpers (clean — no diagnostics emitted) --------------
+
+defp sema_expr_match(pool :: []Node, ch :: []int, types :: []int,
+                     syms :: []Sym, sym_len :: int,
+                     fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
+                     dc :: DiagCollector, src :: string, file :: string,
+                     idx :: int) :: int do
+  node = pool.get(idx)
+  _t  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+  as  = node.b
+  al  = node.c
+  ret = @TID_INT
+  ai  = 0
+  while ai < al do
+    arm_idx = ch.get(as + ai)
+    arm     = pool.get(arm_idx)
+    arm_t   = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, arm.a)
+    if ai == 0 do ret = arm_t end
+    ai = ai + 1
+  end
+  types.set(idx, ret)
+  return ret
+end
+
+defp sema_expr_pipe(pool :: []Node, ch :: []int, types :: []int,
+                    syms :: []Sym, sym_len :: int,
+                    fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
+                    dc :: DiagCollector, src :: string, file :: string,
+                    idx :: int) :: int do
+  node = pool.get(idx)
+  _lt = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+  rt  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
+  types.set(idx, rt)
+  return rt
+end
+
+defp sema_expr_tuple(pool :: []Node, ch :: []int, types :: []int,
+                     syms :: []Sym, sym_len :: int,
+                     fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
+                     dc :: DiagCollector, src :: string, file :: string,
+                     idx :: int) :: int do
+  node = pool.get(idx)
+  ts = node.a
+  tl = node.b
+  ti = 0
+  while ti < tl do
+    ci = ch.get(ts + ti)
+    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, ci)
+    ti = ti + 1
+  end
+  types.set(idx, @TID_TUPLE)
+  return @TID_TUPLE
+end
+
+defp sema_expr_struct_lit(pool :: []Node, ch :: []int, types :: []int,
+                          syms :: []Sym, sym_len :: int,
+                          fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
+                          dc :: DiagCollector, src :: string, file :: string,
+                          idx :: int) :: int do
+  node = pool.get(idx)
+  tid = struct_lookup_tid(structs, node.name)
+  cs  = node.a
+  cl  = node.b
+  fi  = 0
+  while fi < cl do
+    field_node_idx = ch.get(cs + fi)
+    fnode = pool.get(field_node_idx)
+    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, fnode.a)
+    fi = fi + 1
+  end
+  types.set(idx, tid)
+  return tid
+end
+
+defp sema_expr_struct_update(pool :: []Node, ch :: []int, types :: []int,
+                             syms :: []Sym, sym_len :: int,
+                             fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
+                             dc :: DiagCollector, src :: string, file :: string,
+                             idx :: int) :: int do
+  node = pool.get(idx)
+  base_tid    = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+  struct_name :: string = ""
+  si = 0
+  while si < structs.len do
+    sd = structs.get(si)
+    if sd.type_id == base_tid do
+      struct_name = sd.name
+    end
+    si = si + 1
+  end
+  updated :: Node = Node{ tag: node.tag, a: node.a, b: node.b, c: node.c, name: struct_name, line: node.line, col: node.col }
+  pool.set(idx, updated)
+  fi = 0
+  while fi < node.c do
+    field_node_idx = ch.get(node.b + fi)
+    fnode = pool.get(field_node_idx)
+    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, fnode.a)
+    fi = fi + 1
+  end
+  types.set(idx, base_tid)
+  return base_tid
+end
+
 # ---- Pass 2: walk expression -------------------------------------------------
 # Returns type_id of the expression. Sets types[idx] as a side effect.
 # dc is threaded through and returned so error detectors can emit diagnostics.
@@ -505,16 +620,16 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
                fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
                dc :: DiagCollector, src :: string, file :: string,
                idx :: int) :: int do
-  if idx < 0 do return 0 end
+  if idx < 0 do return @TID_UNKNOWN end
   node = pool.get(idx)
   tag  = node.tag
 
-  if tag == :int_lit    do types.set(idx, 1) return 1 end
-  if tag == :float_lit  do types.set(idx, 2) return 2 end
-  if tag == :string_lit do types.set(idx, 4) return 4 end
-  if tag == :atom_lit   do types.set(idx, 5) return 5 end
-  if tag == :bool_lit   do types.set(idx, 3) return 3 end
-  if tag == :array_lit  do types.set(idx, 7) return 7 end
+  if tag == :int_lit    do types.set(idx, @TID_INT)    return @TID_INT    end
+  if tag == :float_lit  do types.set(idx, @TID_FLOAT)  return @TID_FLOAT  end
+  if tag == :string_lit do types.set(idx, @TID_STRING) return @TID_STRING end
+  if tag == :atom_lit   do types.set(idx, @TID_ATOM)   return @TID_ATOM   end
+  if tag == :bool_lit   do types.set(idx, @TID_BOOL)   return @TID_BOOL   end
+  if tag == :array_lit  do types.set(idx, @TID_ARRAY)  return @TID_ARRAY  end
 
   if tag == :ident do
     tid = sym_lookup(syms, sym_len, node.name)
@@ -566,15 +681,15 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
     rt = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
     op = node.name
     if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=" do
-      types.set(idx, 3)
-      return 3
+      types.set(idx, @TID_BOOL)
+      return @TID_BOOL
     end
     if op == "and" or op == "or" do
-      types.set(idx, 3)
-      return 3
+      types.set(idx, @TID_BOOL)
+      return @TID_BOOL
     end
     tid = lt
-    if rt == 2 do tid = 2 end
+    if rt == @TID_FLOAT do tid = @TID_FLOAT end
     types.set(idx, tid)
     return tid
   end
@@ -582,8 +697,8 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
   if tag == :unary do
     st = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     if node.name == "not" do
-      types.set(idx, 3)
-      return 3
+      types.set(idx, @TID_BOOL)
+      return @TID_BOOL
     end
     types.set(idx, st)
     return st
@@ -621,9 +736,9 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
     end
     # Look up return type: user fn first, then built-ins
     ret = fnsig_lookup(fns, node.name)
-    if ret == 0 do
+    if ret == @TID_UNKNOWN do
       ret = builtin_ret(node.name)
-      if ret == 0 do
+      if ret == @TID_UNKNOWN do
         # E005: unknown function
         snip  = extract_snippet(src, node.line)
         caret = make_caret(node.col, str_len(node.name))
@@ -675,10 +790,10 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
     if recv_node.tag == :ident do
       if sym_contains(syms, sym_len, recv_node.name) == false do
         ns_ret_check = fnsig_lookup(fns, node.name)
-        if ns_ret_check == 0 do
+        if ns_ret_check == @TID_UNKNOWN do
           ns_ret_check = builtin_ret(node.name)
         end
-        if ns_ret_check != 0 do
+        if ns_ret_check != @TID_UNKNOWN do
           is_ns_call = true
         end
         # Even if the function isn't found yet, treat any unknown.method() as
@@ -689,7 +804,7 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
         end
       end
     end
-    recv_t = 0
+    recv_t = @TID_UNKNOWN
     if is_ns_call == false do
       recv_t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     end
@@ -703,22 +818,22 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
     end
     mn = node.name
     # String method return types
-    if recv_t == 4 or recv_t == 5 do
-      if mn == "len"         do types.set(idx, 1) return 1 end
-      if mn == "upper"       do types.set(idx, 4) return 4 end
-      if mn == "lower"       do types.set(idx, 4) return 4 end
-      if mn == "trim"        do types.set(idx, 4) return 4 end
-      if mn == "repeat"      do types.set(idx, 4) return 4 end
-      if mn == "slice"       do types.set(idx, 4) return 4 end
-      if mn == "concat"      do types.set(idx, 4) return 4 end
-      if mn == "contains"    do types.set(idx, 3) return 3 end
-      if mn == "starts_with" do types.set(idx, 3) return 3 end
-      if mn == "ends_with"   do types.set(idx, 3) return 3 end
-      if mn == "eq"          do types.set(idx, 3) return 3 end
+    if recv_t == @TID_STRING or recv_t == @TID_ATOM do
+      if mn == "len"         do types.set(idx, @TID_INT)    return @TID_INT    end
+      if mn == "upper"       do types.set(idx, @TID_STRING) return @TID_STRING end
+      if mn == "lower"       do types.set(idx, @TID_STRING) return @TID_STRING end
+      if mn == "trim"        do types.set(idx, @TID_STRING) return @TID_STRING end
+      if mn == "repeat"      do types.set(idx, @TID_STRING) return @TID_STRING end
+      if mn == "slice"       do types.set(idx, @TID_STRING) return @TID_STRING end
+      if mn == "concat"      do types.set(idx, @TID_STRING) return @TID_STRING end
+      if mn == "contains"    do types.set(idx, @TID_BOOL)   return @TID_BOOL   end
+      if mn == "starts_with" do types.set(idx, @TID_BOOL)   return @TID_BOOL   end
+      if mn == "ends_with"   do types.set(idx, @TID_BOOL)   return @TID_BOOL   end
+      if mn == "eq"          do types.set(idx, @TID_BOOL)   return @TID_BOOL   end
     end
-    if mn == "len"   do types.set(idx, 1) return 1 end
-    if mn == "push"  do types.set(idx, 6) return 6 end
-    if mn == "set"   do types.set(idx, 6) return 6 end
+    if mn == "len"   do types.set(idx, @TID_INT)  return @TID_INT  end
+    if mn == "push"  do types.set(idx, @TID_VOID) return @TID_VOID end
+    if mn == "set"   do types.set(idx, @TID_VOID) return @TID_VOID end
     if mn == "get" do
       elem_t = 0
       if recv_node.tag == :ident do
@@ -743,12 +858,12 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
         end
         si = si + 1
       end
-      if recv_t == 0 do
+      if recv_t == @TID_UNKNOWN do
         ns_ret = fnsig_lookup(fns, mn)
-        if ns_ret == 0 do
+        if ns_ret == @TID_UNKNOWN do
           ns_ret = builtin_ret(mn)
         end
-        if ns_ret == 0 do
+        if ns_ret == @TID_UNKNOWN do
           # E005: unknown function in namespace call
           snip  = extract_snippet(src, node.line)
           caret = make_caret(node.col, str_len(node.name))
@@ -770,18 +885,18 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
         return ns_ret
       end
     end
-    types.set(idx, 0)
-    return 0
+    types.set(idx, @TID_UNKNOWN)
+    return @TID_UNKNOWN
   end
 
   if tag == :field_get do
     obj_t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     # String .len → int
-    if obj_t == 4 or obj_t == 5 do
-      if node.name == "len" do types.set(idx, 1) return 1 end
+    if obj_t == @TID_STRING or obj_t == @TID_ATOM do
+      if node.name == "len" do types.set(idx, @TID_INT) return @TID_INT end
     end
     ft    = field_lookup(fields, obj_t, node.name)
-    if ft == 0 and obj_t > 9 do
+    if ft == 0 and obj_t > @TID_TUPLE do
       # Check if this is an enum type — enum variants are not struct fields, suppress E007
       is_enum = false
       si_e = 0
@@ -835,98 +950,42 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
     obj_t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     _t2   = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
     # String indexing returns int (byte value)
-    if obj_t == 4 or obj_t == 5 do types.set(idx, 1) return 1 end
-    types.set(idx, 0)
-    return 0
+    if obj_t == @TID_STRING or obj_t == @TID_ATOM do types.set(idx, @TID_INT) return @TID_INT end
+    types.set(idx, @TID_UNKNOWN)
+    return @TID_UNKNOWN
   end
 
   if tag == :match_expr do
-    _t  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
-    as  = node.b
-    al  = node.c
-    ret = 1
-    ai  = 0
-    while ai < al do
-      arm_idx = ch.get(as + ai)
-      arm     = pool.get(arm_idx)
-      arm_t   = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, arm.a)
-      if ai == 0 do ret = arm_t end
-      ai = ai + 1
-    end
-    types.set(idx, ret)
-    return ret
+    return sema_expr_match(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, idx)
   end
 
   if tag == :pipe_expr do
-    _lt = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
-    rt  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
-    types.set(idx, rt)
-    return rt
+    return sema_expr_pipe(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, idx)
   end
 
   if tag == :interp_expr do
     _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
-    types.set(idx, 4)
-    return 4
+    types.set(idx, @TID_STRING)
+    return @TID_STRING
   end
 
   if tag == :range_expr do
     _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
-    types.set(idx, 7)
-    return 7
+    types.set(idx, @TID_ARRAY)
+    return @TID_ARRAY
   end
 
   if tag == :tuple_lit do
-    ts = node.a
-    tl = node.b
-    ti = 0
-    while ti < tl do
-      ci = ch.get(ts + ti)
-      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, ci)
-      ti = ti + 1
-    end
-    types.set(idx, 9)
-    return 9
+    return sema_expr_tuple(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, idx)
   end
 
   if tag == :struct_lit do
-    tid = struct_lookup_tid(structs, node.name)
-    cs  = node.a
-    cl  = node.b
-    fi  = 0
-    while fi < cl do
-      field_node_idx = ch.get(cs + fi)
-      fnode = pool.get(field_node_idx)
-      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, fnode.a)
-      fi = fi + 1
-    end
-    types.set(idx, tid)
-    return tid
+    return sema_expr_struct_lit(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, idx)
   end
 
   if tag == :struct_update do
-    base_tid    = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
-    struct_name :: string = ""
-    si = 0
-    while si < structs.len do
-      sd = structs.get(si)
-      if sd.type_id == base_tid do
-        struct_name = sd.name
-      end
-      si = si + 1
-    end
-    updated :: Node = Node{ tag: node.tag, a: node.a, b: node.b, c: node.c, name: struct_name, line: node.line, col: node.col }
-    pool.set(idx, updated)
-    fi = 0
-    while fi < node.c do
-      field_node_idx = ch.get(node.b + fi)
-      fnode = pool.get(field_node_idx)
-      _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, fnode.a)
-      fi = fi + 1
-    end
-    types.set(idx, base_tid)
-    return base_tid
+    return sema_expr_struct_update(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, idx)
   end
 
   # if/else used as an expression — type is the last expression in the then-branch.
@@ -944,7 +1003,7 @@ defp sema_expr(pool :: []Node, ch :: []int, types :: []int,
     return t_tid
   end
 
-  return 0
+  return @TID_UNKNOWN
 end
 
 # ---- Pass 2: walk statement --------------------------------------------------
@@ -1048,7 +1107,7 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
   if tag == :return_stmt do
     ret_t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     # E006: return type mismatch
-    if cur_fn_ret != 0 and cur_fn_ret != 6 and ret_t != 0 and ret_t != cur_fn_ret do
+    if cur_fn_ret != @TID_UNKNOWN and cur_fn_ret != @TID_VOID and ret_t != @TID_UNKNOWN and ret_t != cur_fn_ret do
       snip  = extract_snippet(src, node.line)
       caret = make_caret(node.col, 6)
       msg   = str_concat("expected `", str_concat(type_name(cur_fn_ret), str_concat("`, found `", str_concat(type_name(ret_t), "`"))))
@@ -1079,13 +1138,13 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
     iter_t   = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
     # Infer loop variable type from the iterator's element type
     iter_node = pool.get(node.a)
-    loop_var_t = 1  # default: int (range iteration)
+    loop_var_t = @TID_INT  # default: int (range iteration)
     loop_var_et = 0
     if iter_node.tag == :ident do
       loop_var_et = sym_elem_lookup(syms, sym_len, iter_node.name)
       if loop_var_et > 0 do loop_var_t = loop_var_et end
-      if loop_var_et == 4 do loop_var_t = 4 end
-      if loop_var_et == 5 do loop_var_t = 5 end
+      if loop_var_et == @TID_STRING do loop_var_t = @TID_STRING end
+      if loop_var_et == @TID_ATOM   do loop_var_t = @TID_ATOM   end
     end
     if iter_node.tag == :at_ref do
       at_bare = str_slice(iter_node.name, 1, str_len(iter_node.name))
@@ -1241,7 +1300,7 @@ defp sema_all(pool :: []Node, ch :: []int, root :: int,
       init_t   = sema_expr(pool, ch, types, syms, attr_sym_len, fns, structs, fields, dc, src, file, init_idx)
       # Extract array element type for array_fixed(@attr) — needed for typed .get()/.set()
       elem_t = 0
-      if init_t == 7 do
+      if init_t == @TID_ARRAY do
         init_nd = pool.get(init_idx)
         if init_nd.tag == :call do
           if init_nd.name == "array_fixed" do
@@ -1311,16 +1370,16 @@ defp sema_all(pool :: []Node, ch :: []int, root :: int,
 end
 
 defp type_name(tid :: int) :: string do
-  if tid == 0 do return "unknown" end
-  if tid == 1 do return "int" end
-  if tid == 2 do return "float" end
-  if tid == 3 do return "bool" end
-  if tid == 4 do return "string" end
-  if tid == 5 do return "atom" end
-  if tid == 6 do return "void" end
-  if tid == 7 do return "array" end
-  if tid == 8 do return "strbuild" end
-  if tid == 9 do return "tuple" end
+  if tid == @TID_UNKNOWN  do return "unknown"  end
+  if tid == @TID_INT      do return "int"      end
+  if tid == @TID_FLOAT    do return "float"    end
+  if tid == @TID_BOOL     do return "bool"     end
+  if tid == @TID_STRING   do return "string"   end
+  if tid == @TID_ATOM     do return "atom"     end
+  if tid == @TID_VOID     do return "void"     end
+  if tid == @TID_ARRAY    do return "array"    end
+  if tid == @TID_STRBUILD do return "strbuild" end
+  if tid == @TID_TUPLE    do return "tuple"    end
   return str_concat("struct#", int_to_str(tid))
 end
 
