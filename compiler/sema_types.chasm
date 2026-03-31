@@ -1,0 +1,142 @@
+# Bootstrap Chasm compiler — semantic analysis and type inference.
+
+# ---- Type ID named constants -------------------------------------------------
+@TID_UNKNOWN  :: persistent = 0
+@TID_INT      :: persistent = 1
+@TID_FLOAT    :: persistent = 2
+@TID_BOOL     :: persistent = 3
+@TID_STRING   :: persistent = 4
+@TID_ATOM     :: persistent = 5
+@TID_VOID     :: persistent = 6
+@TID_ARRAY    :: persistent = 7
+@TID_STRBUILD :: persistent = 8
+@TID_TUPLE    :: persistent = 9
+
+# ---- Symbol table ------------------------------------------------------------
+# Pre-allocated flat array; sym_len tracks the logical size.
+# Ints are passed by value, so callers own their sym_len.
+# sema_block gets a copy — its additions are discarded on return.
+
+defstruct Sym do
+  name      :: string
+  type_id   :: int
+  elem_type :: int
+  lifetime  :: int
+end
+
+defp make_sym_pool(cap :: int) :: []Sym do
+  pool  :: []Sym = []
+  empty :: Sym   = Sym{ name: "", type_id: 0, elem_type: 0, lifetime: 0 }
+  i = 0
+  while i < cap do
+    pool.push(empty)
+    i = i + 1
+  end
+  return pool
+end
+
+defp sym_lookup(syms :: []Sym, sym_len :: int, name :: string) :: int do
+  i = sym_len - 1
+  while i >= 0 do
+    s = syms.get(i)
+    if s.name == name do
+      return s.type_id
+    end
+    i = i - 1
+  end
+  return @TID_UNKNOWN
+end
+
+defp sym_elem_lookup(syms :: []Sym, sym_len :: int, name :: string) :: int do
+  i = sym_len - 1
+  while i >= 0 do
+    s = syms.get(i)
+    if s.name == name do
+      return s.elem_type
+    end
+    i = i - 1
+  end
+  return @TID_UNKNOWN
+end
+
+defp sym_contains(syms :: []Sym, sym_len :: int, name :: string) :: bool do
+  i = sym_len - 1
+  while i >= 0 do
+    s = syms.get(i)
+    if s.name == name do
+      return true
+    end
+    i = i - 1
+  end
+  return false
+end
+
+defp sym_push(syms :: []Sym, sym_len :: int, name :: string, type_id :: int, elem_t :: int) :: int do
+  s :: Sym = Sym{ name: name, type_id: type_id, elem_type: elem_t, lifetime: 1 }
+  syms.set(sym_len, s)
+  return sym_len + 1
+end
+
+defp sym_push_lt(syms :: []Sym, sym_len :: int, name :: string, type_id :: int, elem_t :: int, lt :: int) :: int do
+  s :: Sym = Sym{ name: name, type_id: type_id, elem_type: elem_t, lifetime: lt }
+  syms.set(sym_len, s)
+  return sym_len + 1
+end
+
+defp sym_lifetime_lookup(syms :: []Sym, sym_len :: int, name :: string) :: int do
+  i = sym_len - 1
+  while i >= 0 do
+    s = syms.get(i)
+    if s.name == name do
+      return s.lifetime
+    end
+    i = i - 1
+  end
+  return 1
+end
+
+# ---- Function signature registry ---------------------------------------------
+
+defstruct FnSig do
+  name         :: string
+  ret_tid      :: int
+  node_idx     :: int
+  params_start :: int
+  params_count :: int
+end
+
+defp fnsig_lookup(fns :: []FnSig, name :: string) :: int do
+  i = 0
+  while i < fns.len do
+    f = fns.get(i)
+    if f.name == name do
+      return f.ret_tid
+    end
+    i = i + 1
+  end
+  return @TID_UNKNOWN
+end
+
+# ---- AttrInfo: per-@attr lifetime and type info ------------------------------
+
+defstruct AttrInfo do
+  name     :: string
+  lifetime :: int
+  type_id  :: int
+  line     :: int
+end
+
+defp attr_info_lookup(attrs :: []AttrInfo, name :: string) :: int do
+  i = 0
+  while i < attrs.len do
+    a = attrs.get(i)
+    if a.name == name do return i end
+    i = i + 1
+  end
+  return -1
+end
+
+# ---- Lifetime inference for RHS expressions ----------------------------------
+# Returns: 1=frame (local/computed), 2=script, 3=persistent
+# Heuristic: @attr references carry the attr's lifetime; everything else is frame.
+

@@ -1,0 +1,676 @@
+
+# ---- Emit typed array helpers for one struct ---------------------------------
+
+defp emit_array_helpers(sn :: string) do
+  print(str_concat("static inline ", str_concat(sn, str_concat(" chasm_array_get_", str_concat(sn, "(ChasmCtx *ctx, ChasmArray *a, int64_t i) {")))))
+  print(str_concat("    static const ", str_concat(sn, " zero = {0};")))
+  print("    if (i < 0 || i >= a->len) return zero;")
+  print(str_concat("    return ((", str_concat(sn, "*)a->data)[i];")))
+  print("}")
+  print(str_concat("static inline void chasm_array_set_", str_concat(sn, str_concat("(ChasmCtx *ctx, ChasmArray *a, int64_t i, ", str_concat(sn, " v) {")))))
+  print(str_concat("    if (i >= 0 && i < a->len) ((", str_concat(sn, "*)a->data)[i] = v;")))
+  print("}")
+  print(str_concat("static inline void chasm_array_push_", str_concat(sn, str_concat("(ChasmCtx *ctx, ChasmArray *a, ", str_concat(sn, " v) {")))))
+  print(str_concat("    if (a->len >= a->cap) { a->cap = a->cap * 2 + 8; a->data = realloc(a->data, (size_t)a->cap * sizeof(", str_concat(sn, ")); }")))
+  print(str_concat("    if (a->data) ((", str_concat(sn, "*)a->data)[a->len++] = v;")))
+  print("}")
+  print(str_concat("static inline ChasmArray chasm_array_fixed_init_", str_concat(sn, str_concat("(ChasmArena *arena, int64_t cap, ", str_concat(sn, " def) {")))))
+  print("    if (cap <= 0) cap = 8;")
+  print(str_concat("    void *d = chasm_alloc(arena, (size_t)cap * sizeof(", str_concat(sn, str_concat("), _Alignof(", str_concat(sn, "));")))))
+  print(str_concat("    if (!d) return (ChasmArray){NULL, 0, cap, (int64_t)sizeof(", str_concat(sn, ")};")))
+  print(str_concat("    ", str_concat(sn, str_concat(" *p = (", str_concat(sn, "*)d; for (int64_t _i = 0; _i < cap; _i++) p[_i] = def;")))))
+  print(str_concat("    return (ChasmArray){d, cap, cap, (int64_t)sizeof(", str_concat(sn, ")};")))
+  print("}")
+  print("")
+end
+
+# ---- Emit enum typedef -------------------------------------------------------
+# For tag-only enums: emit typedef enum { ... } Name;
+# For payload enums:  emit typedef enum + tagged union struct.
+
+defp enum_has_payloads(pool :: []Node, ch :: []int, decl_idx :: int) :: bool do
+  decl = pool.get(decl_idx)
+  vs   = decl.a
+  vl   = decl.b
+  i = 0
+  while i < vl do
+    vi  = ch.get(vs + i)
+    vn  = pool.get(vi)
+    raw = vn.name
+    ci  = 0
+    while ci < str_len(raw) do
+      if str_char_at(raw, ci) == 58 do
+        return true
+      end
+      ci = ci + 1
+    end
+    i = i + 1
+  end
+  return false
+end
+
+defp emit_enum_def(pool :: []Node, ch :: []int, structs :: []StructDef, decl_idx :: int) do
+  decl  = pool.get(decl_idx)
+  ename = decl.name
+  vs    = decl.a
+  vl    = decl.b
+  has_p = enum_has_payloads(pool, ch, decl_idx)
+  # Emit the tag enum
+  print("typedef enum {")
+  i = 0
+  while i < vl do
+    vi   = ch.get(vs + i)
+    vn   = pool.get(vi)
+    raw  = vn.name
+    vname = raw
+    ci = 0
+    while ci < str_len(raw) do
+      if str_char_at(raw, ci) == 58 do
+        vname = str_slice(raw, 0, ci)
+        ci = str_len(raw)
+      end
+      ci = ci + 1
+    end
+    comma = ","
+    if i == vl - 1 do comma = "" end
+    print(str_concat("  ", str_concat(ename, str_concat("_", str_concat(vname, str_concat(" = ", str_concat(int_to_str(i), comma)))))))
+    i = i + 1
+  end
+  print(str_concat("} ", str_concat(ename, "_Tag;")))
+  print("")
+  if has_p do
+    # Emit tagged union struct
+    print("typedef struct {")
+    print(str_concat("  ", str_concat(ename, "_Tag tag;")))
+    print("  union {")
+    i = 0
+    while i < vl do
+      vi   = ch.get(vs + i)
+      vn   = pool.get(vi)
+      raw  = vn.name
+      vname = raw
+      payload_types = ""
+      ci = 0
+      while ci < str_len(raw) do
+        if str_char_at(raw, ci) == 58 do
+          vname         = str_slice(raw, 0, ci)
+          payload_types = str_slice(raw, ci + 1, str_len(raw))
+          ci = str_len(raw)
+        end
+        ci = ci + 1
+      end
+      if str_len(payload_types) > 0 do
+        # Count commas to determine number of payload fields
+        field_count = 1
+        ci2 = 0
+        while ci2 < str_len(payload_types) do
+          if str_char_at(payload_types, ci2) == 44 do field_count = field_count + 1 end
+          ci2 = ci2 + 1
+        end
+        if field_count == 1 do
+          # Single payload: struct { type v; } Variant;
+          print(str_concat("    struct { ", str_concat(payload_types, str_concat(" v; } ", str_concat(vname, ";")))))
+        else
+          # Multi payload: struct { type0 v0; type1 v1; ... } Variant;
+          fields_str = ""
+          fi2 = 0
+          start2 = 0
+          ci3 = 0
+          while ci3 <= str_len(payload_types) do
+            is_end3   = ci3 == str_len(payload_types)
+            is_comma3 = false
+            if ci3 < str_len(payload_types) do
+              if str_char_at(payload_types, ci3) == 44 do is_comma3 = true end
+            end
+            if is_end3 or is_comma3 do
+              type_name3 = str_slice(payload_types, start2, ci3)
+              fields_str = str_concat(fields_str, str_concat(type_name3, str_concat(" v", str_concat(int_to_str(fi2), "; "))))
+              fi2 = fi2 + 1
+              start2 = ci3 + 1
+            end
+            ci3 = ci3 + 1
+          end
+          print(str_concat("    struct { ", str_concat(fields_str, str_concat("} ", str_concat(vname, ";")))))
+        end
+      end
+      i = i + 1
+    end
+    print("  };")
+    print(str_concat("} ", str_concat(ename, ";")))
+    print("")
+    # Emit constructor macros for each payload variant
+    i = 0
+    while i < vl do
+      vi   = ch.get(vs + i)
+      vn   = pool.get(vi)
+      raw  = vn.name
+      vname = raw
+      payload_types = ""
+      ci = 0
+      while ci < str_len(raw) do
+        if str_char_at(raw, ci) == 58 do
+          vname         = str_slice(raw, 0, ci)
+          payload_types = str_slice(raw, ci + 1, str_len(raw))
+          ci = str_len(raw)
+        end
+        ci = ci + 1
+      end
+      if str_len(payload_types) > 0 do
+        # Count fields
+        field_count2 = 1
+        ci4 = 0
+        while ci4 < str_len(payload_types) do
+          if str_char_at(payload_types, ci4) == 44 do field_count2 = field_count2 + 1 end
+          ci4 = ci4 + 1
+        end
+        if field_count2 == 1 do
+          # Single: #define Enum_make_V(val) (Enum){ .tag=Enum_V, .V.v=(val) }
+          print(str_concat("#define ", str_concat(ename, str_concat("_make_", str_concat(vname, str_concat("(val) (", str_concat(ename, str_concat("){ .tag = ", str_concat(ename, str_concat("_", str_concat(vname, str_concat(", .", str_concat(vname, str_concat(".v = (val) }", ""))))))))))))))
+        else
+          # Multi: build param list (v0,v1,...) and assignment list
+          params_str = ""
+          assign_str = ""
+          fi3 = 0
+          start3 = 0
+          ci5 = 0
+          while ci5 <= str_len(payload_types) do
+            is_end5   = ci5 == str_len(payload_types)
+            is_comma5 = false
+            if ci5 < str_len(payload_types) do
+              if str_char_at(payload_types, ci5) == 44 do is_comma5 = true end
+            end
+            if is_end5 or is_comma5 do
+              vfield = str_concat("v", int_to_str(fi3))
+              if fi3 > 0 do
+                params_str = str_concat(params_str, ",")
+                assign_str = str_concat(assign_str, ", ")
+              end
+              params_str = str_concat(params_str, vfield)
+              assign_str = str_concat(assign_str, str_concat(".", str_concat(vname, str_concat(".", str_concat(vfield, str_concat(" = (", str_concat(vfield, ")")))))))
+              fi3 = fi3 + 1
+              start3 = ci5 + 1
+            end
+            ci5 = ci5 + 1
+          end
+          print(str_concat("#define ", str_concat(ename, str_concat("_make_", str_concat(vname, str_concat("(", str_concat(params_str, str_concat(") (", str_concat(ename, str_concat("){ .tag = ", str_concat(ename, str_concat("_", str_concat(vname, str_concat(", ", str_concat(assign_str, " }")))))))))))))))))
+        end
+      end
+      i = i + 1
+    end
+    print("")
+  else
+    # Tag-only: typedef the tag enum directly as the type
+    print(str_concat("typedef ", str_concat(ename, str_concat("_Tag ", str_concat(ename, ";")))))
+    print("")
+  end
+end
+
+
+
+defp emit_struct_defs(structs :: []StructDef, fields :: []FieldDef, pool :: []Node, ch :: []int) do
+  if structs.len == 0 do return end
+  # First pass: emit enums
+  has_enums = false
+  si = 0
+  while si < structs.len do
+    sd = structs.get(si)
+    sn = pool.get(sd.node_idx)
+    if sn.tag == :enum_decl do
+      if has_enums == false do
+        print("/* Enum types */")
+        has_enums = true
+      end
+      emit_enum_def(pool, ch, structs, sd.node_idx)
+    end
+    si = si + 1
+  end
+  # Second pass: emit structs
+  has_structs = false
+  si = 0
+  while si < structs.len do
+    sd = structs.get(si)
+    sn = pool.get(sd.node_idx)
+    if sn.tag == :defstruct do
+      if has_structs == false do
+        print("/* Struct types */")
+        has_structs = true
+      end
+      print("typedef struct {")
+      fi = 0
+      while fi < fields.len do
+        fd = fields.get(fi)
+        if fd.struct_tid == sd.type_id do
+          print(str_concat("    ", str_concat(c_type(fd.type_id, structs), str_concat(" ", str_concat(fd.name, ";")))))
+        end
+        fi = fi + 1
+      end
+      print(str_concat("} ", str_concat(sd.name, ";")))
+      print("")
+    end
+    si = si + 1
+  end
+  if has_structs do
+    print("/* Typed array helpers */")
+    si = 0
+    while si < structs.len do
+      sd = structs.get(si)
+      sn = pool.get(sd.node_idx)
+      if sn.tag == :defstruct do
+        emit_array_helpers(sd.name)
+      end
+      si = si + 1
+    end
+  end
+end
+
+# ---- Emit forward declarations -----------------------------------------------
+
+# ---- Detect actual C return type for a function (handles tuple returns) ------
+
+defp fn_actual_ret_c(pool :: []Node, ch :: []int, fn_idx :: int, structs :: []StructDef) :: string do
+  fn_node = pool.get(fn_idx)
+  ret_tid = fn_split_ret(fn_node.name, structs)
+  # Walk body block looking for a return_stmt with tuple_lit child
+  body    = fn_node.c
+  if body < 0 do return c_type(ret_tid, structs) end
+  bnode   = pool.get(body)
+  bs      = bnode.a
+  bl      = bnode.b
+  i = 0
+  while i < bl do
+    si   = ch.get(bs + i)
+    sn   = pool.get(si)
+    if sn.tag == :return_stmt do
+      if sn.a >= 0 do
+        rn = pool.get(sn.a)
+        if rn.tag == :tuple_lit do
+          if rn.b == 3 do return "ChasmTuple3" end
+          return "ChasmTuple2"
+        end
+      end
+    end
+    i = i + 1
+  end
+  return c_type(ret_tid, structs)
+end
+
+defp emit_fwd_decls(pool :: []Node, ch :: []int, structs :: []StructDef, fns :: []FnSig) do
+  if fns.len == 0 do return end
+  print("/* Forward declarations */")
+  i = 0
+  while i < fns.len do
+    f        = fns.get(i)
+    ret_c    = fn_actual_ret_c(pool, ch, f.node_idx, structs)
+    fn_node  = pool.get(f.node_idx)
+    ps       = fn_node.a
+    pc       = fn_node.b
+    params_s = ""
+    j = 0
+    while j < pc do
+      param_idx  = ch.get(ps + j)
+      param_node = pool.get(param_idx)
+      type_ref   = pool.get(param_node.a)
+      param_tid  = resolve_type(type_ref.name, structs)
+      param_c    = c_type(param_tid, structs)
+      params_s   = str_concat(params_s, str_concat(", ", param_c))
+      j = j + 1
+    end
+    print(str_concat(ret_c, str_concat(" chasm_", str_concat(f.name, str_concat("(ChasmCtx *ctx", str_concat(params_s, ");"))))))
+    i = i + 1
+  end
+  print("")
+end
+
+# ---- Pre-populate @attr lifetimes and array elem types into var_elems --------
+# Used by both emit_fn and the chasm_main scripting block so they share the
+# same logic for recognising fixed/growable array attrs and their lifetimes.
+
+defp populate_attr_var_elems(pool :: []Node, ch :: []int, types :: []int,
+                              structs :: []StructDef,
+                              var_elems :: []VarElem, ve_len :: int,
+                              root :: int) :: int do
+  root_node = pool.get(root)
+  rcs = root_node.a
+  rcl = root_node.b
+  ri = 0
+  while ri < rcl do
+    rdecl_idx = ch.get(rcs + ri)
+    rdecl     = pool.get(rdecl_idx)
+    if rdecl.tag == :at_decl do
+      rattr_name = str_slice(rdecl.name, 1, str_len(rdecl.name))
+      ve_len = ve_push(var_elems, ve_len, str_concat("__lt_", rattr_name), rdecl.b)
+      rinit_t = types.get(rdecl.a)
+      if rinit_t == @TID_ARRAY do
+        rinit_node = pool.get(rdecl.a)
+        if rinit_node.tag == :call do
+          if rinit_node.name == "array_fixed" do
+            fixed_elem_tid = -2
+            if rinit_node.b >= 2 do
+              def_arg_idx = ch.get(rinit_node.a + 1)
+              def_arg_t   = types.get(def_arg_idx)
+              if def_arg_t == @TID_FLOAT do fixed_elem_tid = -3 end
+              if def_arg_t > @TID_TUPLE  do fixed_elem_tid = def_arg_t end
+            end
+            ve_len = ve_push(var_elems, ve_len, rattr_name, fixed_elem_tid)
+          end
+        end
+      end
+    end
+    ri = ri + 1
+  end
+  return ve_len
+end
+
+# ---- Emit a single function definition ---------------------------------------
+
+defp emit_fn(pool :: []Node, ch :: []int, types :: []int,
+             structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+             fn_idx :: int, root :: int) do
+  fn_node      = pool.get(fn_idx)
+  params_start = fn_node.a
+  params_count = fn_node.b
+  body         = fn_node.c
+  fn_name      = fn_split_name(fn_node.name)
+  ret_c        = fn_actual_ret_c(pool, ch, fn_idx, structs)
+  # Build parameter list and populate var_elems for params
+  params_str = ""
+  var_elems  :: []VarElem = make_ve_pool(1024)
+  ve_len     = 0
+  # Pre-populate fixed @attr arrays so push calls on them use push_fixed.
+  # Also register attr lifetimes under "__lt_<name>" for use in at_assign emit.
+  ve_len = populate_attr_var_elems(pool, ch, types, structs, var_elems, ve_len, root)
+  i = 0
+  while i < params_count do
+    param_idx  = ch.get(params_start + i)
+    param_node = pool.get(param_idx)
+    type_ref   = pool.get(param_node.a)
+    param_tid  = resolve_type(type_ref.name, structs)
+    param_c    = c_type(param_tid, structs)
+    params_str = str_concat(params_str, str_concat(", ", str_concat(param_c, str_concat(" ", param_node.name))))
+    # Track array elem type for this param; register all params as declared.
+    ann_n = type_ref.name
+    if str_len(ann_n) >= 2 do
+      if str_slice(ann_n, 0, 2) == "[]" do
+        et     = elem_type_of_ann(ann_n, structs)
+        ve_len = ve_push(var_elems, ve_len, param_node.name, et)
+      end
+    end
+    if ve_declared(var_elems, ve_len, param_node.name) == false do
+      ve_len = ve_push(var_elems, ve_len, param_node.name, 0)
+    end
+    i = i + 1
+  end
+  print(str_concat(ret_c, str_concat(" chasm_", str_concat(fn_name, str_concat("(ChasmCtx *ctx", str_concat(params_str, ") {"))))))
+  # Emit all but the last statement normally, then handle implicit return on the last
+  if body >= 0 do
+    body_node = pool.get(body)
+    bcs = body_node.a
+    bcl = body_node.b
+    # Emit all statements except the last
+    bi = 0
+    while bi < bcl - 1 do
+      child = ch.get(bcs + bi)
+      cn    = pool.get(child)
+      if is_stmt_tag(cn.tag) do
+        ve_len = emit_stmt(pool, ch, types, structs, fns, fields, var_elems, ve_len, 1, child)
+      end
+      bi = bi + 1
+    end
+    # Handle the last statement: if it's an expression and function is non-void, emit return
+    if bcl > 0 do
+      last_child = ch.get(bcs + bcl - 1)
+      last_node  = pool.get(last_child)
+      is_expr_stmt = last_node.tag == :call or last_node.tag == :method_call or
+                     last_node.tag == :binop or last_node.tag == :unary or
+                     last_node.tag == :ident or last_node.tag == :at_ref or
+                     last_node.tag == :int_lit or last_node.tag == :float_lit or
+                     last_node.tag == :string_lit or last_node.tag == :bool_lit or
+                     last_node.tag == :field_get or last_node.tag == :index or
+                     last_node.tag == :struct_lit or last_node.tag == :match_expr or
+                     last_node.tag == :pipe_expr or last_node.tag == :if_stmt
+      is_void_ret = ret_c == "void"
+      already_returns = last_node.tag == :return_stmt or
+                        last_node.tag == :while_stmt or last_node.tag == :for_stmt
+      if is_expr_stmt and is_void_ret == false and already_returns == false do
+        ec = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, last_child)
+        print(str_concat("  return ", str_concat(ec, ";")))
+      else
+        if is_stmt_tag(last_node.tag) do
+          ve_len = emit_stmt(pool, ch, types, structs, fns, fields, var_elems, ve_len, 1, last_child)
+        end
+      end
+    end
+  end
+  print("}")
+  print("")
+end
+
+# ---- Top-level codegen entry point ------------------------------------------
+
+defp codegen(pool :: []Node, ch :: []int, root :: int,
+             types :: []int, structs :: []StructDef,
+             fields :: []FieldDef, fns :: []FnSig) do
+  print("/* Generated by Chasm bootstrap compiler - do not edit. */")
+  print("#include \042chasm_rt.h\042")
+  print("")
+  emit_struct_defs(structs, fields, pool, ch)
+  emit_fwd_decls(pool, ch, structs, fns)
+  root_node = pool.get(root)
+  cs = root_node.a
+  cl = root_node.b
+  # Check if any @attr is an array — if so emit arena-backed array helpers once.
+  has_array_attr = false
+  i = 0
+  while i < cl do
+    decl_idx = ch.get(cs + i)
+    decl     = pool.get(decl_idx)
+    if decl.tag == :at_decl do
+      init_t = types.get(decl.a)
+      if init_t == @TID_ARRAY do
+        has_array_attr = true
+      end
+    end
+    i = i + 1
+  end
+  if has_array_attr do
+    print("#ifndef CHASM_ARRAY_FIXED_HELPERS_DEFINED")
+    print("#define CHASM_ARRAY_FIXED_HELPERS_DEFINED")
+    print("/* Arena-backed array helpers for @attr arrays */")
+    print("/* array_fixed_in: allocates data from arena at fixed capacity — never grows. */")
+    print("static inline ChasmArray chasm_array_fixed_in(ChasmArena *arena, int64_t cap) {")
+    print("    if (cap <= 0) cap = 8;")
+    print("    void *d = chasm_alloc(arena, (size_t)cap * 8, 8);")
+    print("    if (!d) return (ChasmArray){NULL, 0, 0};")
+    print("    return (ChasmArray){d, 0, cap};")
+    print("}")
+    print("/* push_fixed: bounds-checked push — aborts on overflow (no realloc). */")
+    print("static inline void chasm_array_push_fixed(ChasmCtx *ctx, ChasmArray *a, int64_t v) {")
+    print("    (void)ctx;")
+    print("    if (a->len >= a->cap) { fprintf(stderr, \"chasm: array_fixed overflow (cap=%lld)\\n\", (long long)a->cap); abort(); }")
+    print("    ((int64_t*)a->data)[a->len++] = v;")
+    print("}")
+    print("/* array_fixed_in_f / push_fixed_f / get_f / set_f: float (double) element variants. */")
+    print("static inline ChasmArray chasm_array_fixed_in_f(ChasmArena *arena, int64_t cap) {")
+    print("    if (cap <= 0) cap = 8;")
+    print("    void *d = chasm_alloc(arena, (size_t)cap * sizeof(double), 8);")
+    print("    if (!d) return (ChasmArray){NULL, 0, 0};")
+    print("    return (ChasmArray){d, 0, cap};")
+    print("}")
+    print("static inline void chasm_array_push_fixed_f(ChasmCtx *ctx, ChasmArray *a, double v) {")
+    print("    (void)ctx;")
+    print("    if (a->len >= a->cap) { fprintf(stderr, \"chasm: array_fixed overflow (cap=%lld)\\n\", (long long)a->cap); abort(); }")
+    print("    ((double*)a->data)[a->len++] = v;")
+    print("}")
+    print("static inline double chasm_array_get_f(ChasmCtx *ctx, ChasmArray *a, int64_t i) {")
+    print("    (void)ctx; if (i < 0 || i >= a->len) return 0.0;")
+    print("    return ((double*)a->data)[i];")
+    print("}")
+    print("static inline void chasm_array_set_f(ChasmCtx *ctx, ChasmArray *a, int64_t i, double v) {")
+    print("    (void)ctx; if (i >= 0 && i < a->len) ((double*)a->data)[i] = v;")
+    print("}")
+    print("/* array_new_in: arena-backed growable array (bump-copy on growth). */")
+    print("static inline ChasmArray chasm_array_new_in(ChasmArena *arena, int64_t cap) {")
+    print("    if (cap <= 0) cap = 8;")
+    print("    void *d = chasm_alloc(arena, (size_t)cap * 8, 8);")
+    print("    if (!d) return (ChasmArray){NULL, 0, 0};")
+    print("    return (ChasmArray){d, 0, cap};")
+    print("}")
+    print("static inline void chasm_array_push_in(ChasmArena *arena, ChasmArray *a, int64_t v) {")
+    print("    if (a->len >= a->cap) {")
+    print("        int64_t new_cap = a->cap * 2 + 8;")
+    print("        void *nd = chasm_alloc(arena, (size_t)new_cap * 8, 8);")
+    print("        if (nd && a->data) memcpy(nd, a->data, (size_t)a->len * 8);")
+    print("        a->data = nd; a->cap = new_cap;")
+    print("    }")
+    print("    if (a->data) ((int64_t*)a->data)[a->len++] = v;")
+    print("}")
+    print("#endif /* CHASM_ARRAY_FIXED_HELPERS_DEFINED */")
+    print("")
+  end
+  # Emit module-level @attr globals
+  has_attrs = false
+  i = 0
+  while i < cl do
+    decl_idx = ch.get(cs + i)
+    decl     = pool.get(decl_idx)
+    if decl.tag == :at_decl do
+      if has_attrs == false do
+        print("/* Module attributes */")
+        has_attrs = true
+      end
+      attr_name = str_slice(decl.name, 1, str_len(decl.name))
+      init_t    = types.get(decl.a)
+      type_c    = c_type(init_t, structs)
+      print(str_concat("static ", str_concat(type_c, str_concat(" g_", str_concat(attr_name, ";")))))
+    end
+    i = i + 1
+  end
+  if has_attrs do
+    print("")
+    print("void chasm_module_init(ChasmCtx *ctx) {")
+    var_elems :: []VarElem = make_ve_pool(64)
+    ve_len = 0
+    i = 0
+    while i < cl do
+      decl_idx = ch.get(cs + i)
+      decl     = pool.get(decl_idx)
+      if decl.tag == :at_decl do
+        attr_name = str_slice(decl.name, 1, str_len(decl.name))
+        init_t    = types.get(decl.a)
+        # For array attrs: use arena-backed allocation keyed to the declared lifetime.
+        # decl.b holds the lifetime: 1=frame, 2=script, 3=persistent (set by parser).
+        if init_t == @TID_ARRAY do
+          # Extract capacity from array_new(cap) or array_fixed(cap) call node
+          init_node = pool.get(decl.a)
+          cap_c = "8"
+          is_fixed = false
+          fixed_elem_tid = -2
+          has_default = false
+          default_c = "0"
+          if init_node.tag == :call do
+            if init_node.name == "array_fixed" do
+              is_fixed = true
+              # Detect elem type from 2nd arg: float=-3, struct=tid, int=-2
+              if init_node.b >= 2 do
+                def_arg_idx = ch.get(init_node.a + 1)
+                def_arg_t   = types.get(def_arg_idx)
+                if def_arg_t == @TID_FLOAT do fixed_elem_tid = -3 end
+                if def_arg_t > @TID_TUPLE  do fixed_elem_tid = def_arg_t end
+                default_c   = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, def_arg_idx)
+                has_default = true
+              end
+            end
+            if init_node.b > 0 do
+              cap_arg_idx = ch.get(init_node.a)
+              cap_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, cap_arg_idx)
+            end
+          end
+          arena_expr = "&ctx->script"
+          if decl.b == 1 do arena_expr = "&ctx->frame" end
+          if decl.b == 3 do arena_expr = "&ctx->persistent" end
+          if is_fixed do
+            if fixed_elem_tid > @TID_TUPLE do
+              # Struct array — typed init handles allocation size and default seeding
+              sn_fixed = struct_name_by_tid(structs, fixed_elem_tid)
+              print(str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_fixed_init_", str_concat(sn_fixed, str_concat("(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, str_concat(", ", str_concat(default_c, ");")))))))))))
+            else
+              if fixed_elem_tid == -3 do
+                print(str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_fixed_in_f(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, ");")))))))
+              else
+                print(str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_fixed_in(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, ");")))))))
+              end
+            end
+            ve_len = ve_push(var_elems, ve_len, attr_name, fixed_elem_tid)
+            # Seed primitive slots with default value if provided (structs handled above)
+            if has_default do
+              if fixed_elem_tid == -3 do
+                print(str_concat("  { int64_t _cap = ", str_concat(cap_c, str_concat("; for (int64_t _di = 0; _di < _cap; _di++) ((double*)g_", str_concat(attr_name, str_concat(".data)[_di] = ", str_concat(default_c, str_concat("; } g_", str_concat(attr_name, str_concat(".len = ", str_concat(cap_c, ";")))))))))))
+              end
+              if fixed_elem_tid == -2 do
+                print(str_concat("  { int64_t _cap = ", str_concat(cap_c, str_concat("; for (int64_t _di = 0; _di < _cap; _di++) ((int64_t*)g_", str_concat(attr_name, str_concat(".data)[_di] = ", str_concat(default_c, str_concat("; } g_", str_concat(attr_name, str_concat(".len = ", str_concat(cap_c, ";")))))))))))
+              end
+            end
+          else
+            print(str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_new_in(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, ");")))))))
+          end
+        else
+          val_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, decl.a)
+          print(str_concat("  g_", str_concat(attr_name, str_concat(" = ", str_concat(val_c, ";")))))
+        end
+      end
+      i = i + 1
+    end
+    print("}")
+    print("")
+  end
+  # Walk root and emit all function declarations
+  i = 0
+  while i < cl do
+    decl_idx = ch.get(cs + i)
+    decl     = pool.get(decl_idx)
+    if decl.tag == :fn_decl do
+      emit_fn(pool, ch, types, structs, fns, fields, decl_idx, root)
+    end
+    i = i + 1
+  end
+  # Collect top-level statements (scripting style) and emit into chasm_main
+  has_toplevel = false
+  i = 0
+  while i < cl do
+    decl_idx = ch.get(cs + i)
+    decl     = pool.get(decl_idx)
+    if decl.tag == :toplevel_stmt do
+      has_toplevel = true
+      i = cl
+    end
+    i = i + 1
+  end
+  if has_toplevel do
+    # Only emit chasm_main if there is no explicit def main() already
+    has_main = false
+    i = 0
+    while i < fns.len do
+      f = fns.get(i)
+      if f.name == "main" do has_main = true end
+      i = i + 1
+    end
+    if has_main == false do
+      print("void chasm_main(ChasmCtx *ctx) {")
+      var_elems :: []VarElem = make_ve_pool(1024)
+      ve_len = 0
+      # Pre-populate @attr lifetimes and array elem types (same as emit_fn)
+      ve_len = populate_attr_var_elems(pool, ch, types, structs, var_elems, ve_len, root)
+      i = 0
+      while i < cl do
+        decl_idx = ch.get(cs + i)
+        decl     = pool.get(decl_idx)
+        if decl.tag == :toplevel_stmt do
+          ve_len = emit_stmt(pool, ch, types, structs, fns, fields, var_elems, ve_len, 1, decl.a)
+        end
+        i = i + 1
+      end
+      print("}")
+      print("")
+    end
+  end
+end

@@ -1,0 +1,128 @@
+# Bootstrap Chasm compiler — C99 code emitter.
+#
+# Walks the typed AST (with types[] filled by sema) and prints C99 to stdout.
+# Uses a VarElem side-table to track array element types per variable.
+
+
+# ---- VarElem: per-variable array element type --------------------------------
+
+defstruct VarElem do
+  name     :: string
+  elem_tid :: int
+end
+
+defp make_ve_pool(cap :: int) :: []VarElem do
+  pool  :: []VarElem = []
+  empty :: VarElem   = VarElem{ name: "", elem_tid: 0 }
+  i = 0
+  while i < cap do
+    pool.push(empty)
+    i = i + 1
+  end
+  return pool
+end
+
+defp ve_lookup(var_elems :: []VarElem, ve_len :: int, name :: string) :: int do
+  i = ve_len - 1
+  while i >= 0 do
+    ve = var_elems.get(i)
+    if ve.name == name do return ve.elem_tid end
+    i = i - 1
+  end
+  return -1
+end
+
+defp ve_declared(var_elems :: []VarElem, ve_len :: int, name :: string) :: bool do
+  i = ve_len - 1
+  while i >= 0 do
+    ve = var_elems.get(i)
+    if ve.name == name do return true end
+    i = i - 1
+  end
+  return false
+end
+
+defp ve_push(var_elems :: []VarElem, ve_len :: int, name :: string, elem_tid :: int) :: int do
+  ve :: VarElem = VarElem{ name: name, elem_tid: elem_tid }
+  var_elems.set(ve_len, ve)
+  return ve_len + 1
+end
+
+# ---- C type helpers ----------------------------------------------------------
+
+defp c_type(tid :: int, structs :: []StructDef) :: string do
+  if tid == @TID_UNKNOWN  do return "int64_t"        end
+  if tid == @TID_INT      do return "int64_t"        end
+  if tid == @TID_FLOAT    do return "double"         end
+  if tid == @TID_BOOL     do return "bool"           end
+  if tid == @TID_STRING   do return "const char*"   end
+  if tid == @TID_ATOM     do return "const char*"   end
+  if tid == @TID_VOID     do return "void"           end
+  if tid == @TID_ARRAY    do return "ChasmArray"     end
+  if tid == @TID_STRBUILD do return "ChasmStrBuilder" end
+  i = 0
+  while i < structs.len do
+    s = structs.get(i)
+    if s.type_id == tid do return s.name end
+    i = i + 1
+  end
+  return "int64_t"
+end
+
+defp struct_name_by_tid(structs :: []StructDef, tid :: int) :: string do
+  i = 0
+  while i < structs.len do
+    s = structs.get(i)
+    if s.type_id == tid do return s.name end
+    i = i + 1
+  end
+  return ""
+end
+
+defp elem_type_of_ann(ann_name :: string, structs :: []StructDef) :: int do
+  n = str_len(ann_name)
+  if n < 3 do return 0 end
+  if str_slice(ann_name, 0, 2) != "[]" do return 0 end
+  elem_name = str_slice(ann_name, 2, n)
+  return resolve_type(elem_name, structs)
+end
+
+defp array_elem_suffix(structs :: []StructDef, elem_tid :: int) :: string do
+  # Only user-defined struct types get a typed suffix (_TypeName).
+  # Primitive types (int, float, bool) use the generic chasm_array_push/get/set (int64_t).
+  # String/atom use the _s suffix (const char* variants).
+  if elem_tid == @TID_UNKNOWN do return "" end
+  if elem_tid == @TID_STRING  do return "_s" end
+  if elem_tid == @TID_ATOM    do return "_s" end
+  sn = struct_name_by_tid(structs, elem_tid)
+  if str_len(sn) > 0 do return str_concat("_", sn) end
+  return ""
+end
+
+# ---- Indentation helper ------------------------------------------------------
+
+defp indent_str(depth :: int) :: string do
+  s = ""
+  i = 0
+  while i < depth do
+    s = str_concat(s, "  ")
+    i = i + 1
+  end
+  return s
+end
+
+# Strip one level of outer parens from a condition string.
+# binop always returns "(lhs op rhs)" — when used directly as an if/while
+# condition the surrounding if(...) would double-wrap. Strip first.
+defp unwrap_cond(s :: string) :: string do
+  n = str_len(s)
+  if n >= 2 do
+    if str_char_at(s, 0) == 40 and str_char_at(s, n - 1) == 41 do
+      return str_slice(s, 1, n - 1)
+    end
+  end
+  return s
+end
+
+# ---- emit_expr helpers (each handles one complex tag) -----------------------
+

@@ -1,0 +1,87 @@
+defp make_node_pool(cap :: int) :: []Node do
+  pool  :: []Node = []
+  empty :: Node   = Node{ tag: :none, a: 0, b: 0, c: 0, name: "", line: 0, col: 0 }
+  i = 0
+  while i < cap do
+    pool.push(empty)
+    i = i + 1
+  end
+  return pool
+end
+
+defp make_int_pool(cap :: int) :: []int do
+  pool :: []int = []
+  i = 0
+  while i < cap do
+    pool.push(0)
+    i = i + 1
+  end
+  return pool
+end
+
+defp alloc_node(pool :: []Node, np :: int, tag :: atom, a :: int, b :: int, c :: int, name :: string, line :: int, col :: int) :: int do
+  n :: Node = Node{ tag: tag, a: a, b: b, c: c, name: name, line: line, col: col }
+  pool.set(np, n)
+  return np + 1
+end
+
+defp invalid() :: int do
+  return -1
+end
+
+defp tok_kind(tokens :: []Token, pos :: int) :: atom do
+  t = tokens.get(pos)
+  return t.kind
+end
+
+defp tok_lex(tokens :: []Token, pos :: int) :: string do
+  t = tokens.get(pos)
+  return t.lexeme
+end
+
+defp tok_line(tokens :: []Token, pos :: int) :: int do
+  t = tokens.get(pos)
+  return t.line
+end
+
+defp tok_col(tokens :: []Token, pos :: int) :: int do
+  t = tokens.get(pos)
+  return t.col
+end
+
+defp skip_newlines(tokens :: []Token, pos :: int) :: int do
+  while tok_kind(tokens, pos) == :newline do
+    pos = pos + 1
+  end
+  return pos
+end
+
+# ---- parse_type_ann: consume one type annotation, handling []TypeName --------
+
+defp parse_type_ann(tokens :: []Token, pos :: int) :: TypeAnn do
+  type_tok = tok_lex(tokens, pos)
+  pos      = pos + 1
+  if type_tok == "[" do
+    if tok_kind(tokens, pos) == :rbracket do
+      pos = pos + 1
+      if tok_kind(tokens, pos) == :ident do
+        type_tok = str_concat("[]", tok_lex(tokens, pos))
+        pos      = pos + 1
+      else
+        type_tok = "[]"
+      end
+    end
+  else
+    if tok_kind(tokens, pos) == :ident do
+      type_tok = str_concat(type_tok, tok_lex(tokens, pos))
+      pos      = pos + 1
+    end
+  end
+  return TypeAnn{ name: type_tok, pos: pos }
+end
+
+# ---- parse_string_interp -----------------------------------------------------
+# Handles string literals with #{expr} interpolation.
+# Called from parse_primary when k == :string_lit.
+# pos points to the string_lit token (before the +1 advance).
+

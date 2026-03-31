@@ -1,0 +1,631 @@
+
+defp parse_return(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+  line = tok_line(tokens, pos)
+  col  = tok_col(tokens, pos)
+  pos  = pos + 1
+  k    = tok_kind(tokens, pos)
+  val  = invalid()
+  if k != :newline and k != :end_kw and k != :else_kw and k != :eof do
+    r   = parse_expr(tokens, pool, np, ch, cp, pos)
+    pos = r.pos
+    np  = r.np
+    cp  = r.cp
+    val = r.node_idx
+    # Multiple return values: return a, b, c
+    if tok_kind(tokens, pos) == :comma do
+      val_list :: []int = []
+      val_list.push(val)
+      while tok_kind(tokens, pos) == :comma do
+        pos = pos + 1
+        r2  = parse_expr(tokens, pool, np, ch, cp, pos)
+        pos = r2.pos
+        np  = r2.np
+        cp  = r2.cp
+        val_list.push(r2.node_idx)
+      end
+      ts = cp
+      i  = 0
+      while i < val_list.len do
+        ch.set(cp, val_list.get(i))
+        cp = cp + 1
+        i  = i + 1
+      end
+      tup_idx = np
+      np  = alloc_node(pool, np, :tuple_lit, ts, val_list.len, 0, "", line, col)
+      val = tup_idx
+    end
+  end
+  node_idx = np
+  np = alloc_node(pool, np, :return_stmt, val, 0, 0, "", line, col)
+  return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
+end
+
+# ---- parse_while -------------------------------------------------------------
+
+defp parse_while(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+  line = tok_line(tokens, pos)
+  col  = tok_col(tokens, pos)
+  pos  = pos + 1
+  r    = parse_expr(tokens, pool, np, ch, cp, pos)
+  pos  = r.pos
+  np   = r.np
+  cp   = r.cp
+  cond = r.node_idx
+  pos  = skip_newlines(tokens, pos)
+  if tok_kind(tokens, pos) == :do_kw do
+    pos = pos + 1
+  end
+  r    = parse_block_body(tokens, pool, np, ch, cp, pos)
+  pos  = r.pos
+  np   = r.np
+  cp   = r.cp
+  body = r.node_idx
+  if tok_kind(tokens, pos) == :end_kw do
+    pos = pos + 1
+  end
+  node_idx = np
+  np = alloc_node(pool, np, :while_stmt, cond, body, 0, "", line, col)
+  return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
+end
+
+# ---- parse_for ---------------------------------------------------------------
+
+defp parse_for(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+  line     = tok_line(tokens, pos)
+  col      = tok_col(tokens, pos)
+  pos      = pos + 1  # consume for
+  var_name = tok_lex(tokens, pos)
+  pos      = pos + 1  # consume iter var
+  if tok_kind(tokens, pos) == :in_kw do
+    pos = pos + 1
+  end
+  r    = parse_expr(tokens, pool, np, ch, cp, pos)
+  pos  = r.pos
+  np   = r.np
+  cp   = r.cp
+  iter = r.node_idx
+  pos  = skip_newlines(tokens, pos)
+  if tok_kind(tokens, pos) == :do_kw do
+    pos = pos + 1
+  end
+  r    = parse_block_body(tokens, pool, np, ch, cp, pos)
+  pos  = r.pos
+  np   = r.np
+  cp   = r.cp
+  body = r.node_idx
+  if tok_kind(tokens, pos) == :end_kw do
+    pos = pos + 1
+  end
+  node_idx = np
+  np = alloc_node(pool, np, :for_stmt, iter, body, 0, var_name, line, col)
+  return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
+end
+
+# ---- parse_if ----------------------------------------------------------------
+
+defp parse_if(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+  line = tok_line(tokens, pos)
+  col  = tok_col(tokens, pos)
+  pos  = pos + 1
+  r    = parse_expr(tokens, pool, np, ch, cp, pos)
+  pos  = r.pos
+  np   = r.np
+  cp   = r.cp
+  cond = r.node_idx
+  pos  = skip_newlines(tokens, pos)
+  if tok_kind(tokens, pos) == :do_kw do
+    pos = pos + 1
+  end
+  r    = parse_block_body(tokens, pool, np, ch, cp, pos)
+  pos  = r.pos
+  np   = r.np
+  cp   = r.cp
+  then = r.node_idx
+  else_block = invalid()
+  if tok_kind(tokens, pos) == :else_kw do
+    pos = pos + 1
+    pos = skip_newlines(tokens, pos)
+    if tok_kind(tokens, pos) == :if_kw do
+      r          = parse_if(tokens, pool, np, ch, cp, pos)
+      pos        = r.pos
+      np         = r.np
+      cp         = r.cp
+      chain_node = r.node_idx
+      # Consume the outer end_kw that closes this if/else-if chain.
+      # Must skip_newlines first because the inner parse_if left pos at a newline.
+      pos = skip_newlines(tokens, pos)
+      if tok_kind(tokens, pos) == :end_kw do
+        pos = pos + 1
+      end
+      cs = cp
+      ch.set(cp, chain_node)
+      cp         = cp + 1
+      else_block = np
+      np = alloc_node(pool, np, :block, cs, 1, 0, "", line, col)
+      node_idx = np
+      np = alloc_node(pool, np, :if_stmt, cond, then, else_block, "", line, col)
+      return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
+    end
+    r          = parse_block_body(tokens, pool, np, ch, cp, pos)
+    pos        = r.pos
+    np         = r.np
+    cp         = r.cp
+    else_block = r.node_idx
+  end
+  if tok_kind(tokens, pos) == :end_kw do
+    pos = pos + 1
+  end
+  node_idx = np
+  np = alloc_node(pool, np, :if_stmt, cond, then, else_block, "", line, col)
+  return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
+end
+
+# ---- parse_stmt --------------------------------------------------------------
+
+defp parse_stmt(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+  k    = tok_kind(tokens, pos)
+  line = tok_line(tokens, pos)
+  col  = tok_col(tokens, pos)
+  if k == :return_kw  do return parse_return(tokens, pool, np, ch, cp, pos) end
+  if k == :if_kw      do return parse_if(tokens, pool, np, ch, cp, pos) end
+  if k == :while_kw   do return parse_while(tokens, pool, np, ch, cp, pos) end
+  if k == :for_kw     do return parse_for(tokens, pool, np, ch, cp, pos) end
+  if k == :break_kw do
+    node_idx = np
+    np = alloc_node(pool, np, :break_stmt, 0, 0, 0, "", line, col)
+    return ParseResult{ pos: pos + 1, np: np, cp: cp, node_idx: node_idx }
+  end
+  if k == :continue_kw do
+    node_idx = np
+    np = alloc_node(pool, np, :continue_stmt, 0, 0, 0, "", line, col)
+    return ParseResult{ pos: pos + 1, np: np, cp: cp, node_idx: node_idx }
+  end
+  # @attr assignment: @name = expr
+  k2 = tok_kind(tokens, pos + 1)
+  if k == :at_ident and k2 == :eq do
+    at_name  = tok_lex(tokens, pos)
+    pos      = pos + 2  # @name =
+    r   = parse_expr(tokens, pool, np, ch, cp, pos)
+    pos = r.pos
+    np  = r.np
+    cp  = r.cp
+    val = r.node_idx
+    lhs = np
+    np  = alloc_node(pool, np, :at_ref, 0, 0, 0, at_name, line, col)
+    node_idx = np
+    np = alloc_node(pool, np, :at_assign, lhs, val, 0, at_name, line, col)
+    return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
+  end
+  # explicit var decl: name :: type = expr
+  if k == :ident and k2 == :colon_colon do
+    var_name = tok_lex(tokens, pos)
+    pos      = pos + 2  # name ::
+    ta       = parse_type_ann(tokens, pos)
+    type_tok = ta.name
+    pos      = ta.pos
+    if tok_kind(tokens, pos) == :eq do
+      pos = pos + 1
+    end
+    r   = parse_expr(tokens, pool, np, ch, cp, pos)
+    pos = r.pos
+    np  = r.np
+    cp  = r.cp
+    val = r.node_idx
+    lhs  = np
+    np   = alloc_node(pool, np, :ident, 0, 0, 0, var_name, line, col)
+    tref = np
+    np   = alloc_node(pool, np, :type_ref, 0, 0, 0, type_tok, line, col)
+    node_idx = np
+    np = alloc_node(pool, np, :var_decl, lhs, val, tref, var_name, line, col)
+    return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
+  end
+  # simple assign: name = expr
+  if k == :ident and k2 == :eq do
+    var_name = tok_lex(tokens, pos)
+    pos      = pos + 2  # name =
+    r   = parse_expr(tokens, pool, np, ch, cp, pos)
+    pos = r.pos
+    np  = r.np
+    cp  = r.cp
+    val = r.node_idx
+    lhs = np
+    np  = alloc_node(pool, np, :ident, 0, 0, 0, var_name, line, col)
+    node_idx = np
+    np = alloc_node(pool, np, :assign, lhs, val, 0, "", line, col)
+    return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
+  end
+  # tuple destructuring: a, b = expr
+  if k == :ident and k2 == :comma do
+    # Collect all lhs names
+    name_list :: []int = []
+    name_list.push(0)  # placeholder count; we store names as a comma-joined string
+    names_str = tok_lex(tokens, pos)
+    pos = pos + 1  # consume first ident
+    while tok_kind(tokens, pos) == :comma do
+      pos = pos + 1
+      next_name = tok_lex(tokens, pos)
+      pos = pos + 1
+      names_str = str_concat(names_str, str_concat(",", next_name))
+    end
+    if tok_kind(tokens, pos) == :eq do
+      pos = pos + 1
+    end
+    r   = parse_expr(tokens, pool, np, ch, cp, pos)
+    pos = r.pos
+    np  = r.np
+    cp  = r.cp
+    val = r.node_idx
+    node_idx = np
+    np = alloc_node(pool, np, :tuple_dest, val, 0, 0, names_str, line, col)
+    return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
+  end
+  return parse_expr(tokens, pool, np, ch, cp, pos)
+end
+
+# ---- parse_block_body --------------------------------------------------------
+# Collects top-level statement node indices into a local list, then writes them
+# contiguously at the END of all expression sub-children.  This ensures that
+# block.a..block.a+block.b contains only statement nodes, not sub-expressions.
+
+defp parse_block_body(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+  pos       = skip_newlines(tokens, pos)
+  stmt_list :: []int = []
+  k         = tok_kind(tokens, pos)
+  while k != :end_kw and k != :else_kw and k != :eof do
+    r   = parse_stmt(tokens, pool, np, ch, cp, pos)
+    pos = r.pos
+    np  = r.np
+    cp  = r.cp
+    si  = r.node_idx
+    if si != -1 do
+      stmt_list.push(si)
+    end
+    pos = skip_newlines(tokens, pos)
+    k   = tok_kind(tokens, pos)
+  end
+  # Write statement indices contiguously after all expression children.
+  cs_block = cp
+  i = 0
+  while i < stmt_list.len do
+    sv = stmt_list.get(i)
+    ch.set(cp, sv)
+    cp = cp + 1
+    i  = i + 1
+  end
+  block_idx = np
+  np = alloc_node(pool, np, :block, cs_block, stmt_list.len, 0, "", 0, 0)
+  return ParseResult{ pos: pos, np: np, cp: cp, node_idx: block_idx }
+end
+
+# ---- parse_defstruct ---------------------------------------------------------
+
+defp parse_defstruct(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+  line = tok_line(tokens, pos)
+  col  = tok_col(tokens, pos)
+  pos  = pos + 1  # consume defstruct
+  name = tok_lex(tokens, pos)
+  pos  = pos + 1  # consume name
+  pos  = skip_newlines(tokens, pos)
+  if tok_kind(tokens, pos) == :do_kw do
+    pos = pos + 1
+  end
+  pos = skip_newlines(tokens, pos)
+  cs  = cp
+  while tok_kind(tokens, pos) != :end_kw and tok_kind(tokens, pos) != :eof do
+    fname = tok_lex(tokens, pos)
+    fline = tok_line(tokens, pos)
+    fcol  = tok_col(tokens, pos)
+    pos   = pos + 1  # consume field name
+    if tok_kind(tokens, pos) == :colon_colon do
+      pos = pos + 1
+    end
+    ta    = parse_type_ann(tokens, pos)
+    tname = ta.name
+    pos   = ta.pos
+    field_idx = np
+    np = alloc_node(pool, np, :field, 0, 0, 0, fname, fline, fcol)
+    type_idx  = np
+    np = alloc_node(pool, np, :type_ref, 0, 0, 0, tname, fline, fcol)
+    ch.set(cp, field_idx)
+    cp = cp + 1
+    def_node_idx = -1
+    # Skip optional default value: = expr; store node index in field.b
+    if tok_kind(tokens, pos) == :eq do
+      pos = pos + 1
+      r_def = parse_expr(tokens, pool, np, ch, cp, pos)
+      pos   = r_def.pos
+      np    = r_def.np
+      def_node_idx = r_def.node_idx
+    end
+    pool.set(field_idx, Node{ tag: :field, a: type_idx, b: def_node_idx, c: 0, name: fname, line: fline, col: fcol })
+    pos = skip_newlines(tokens, pos)
+  end
+  if tok_kind(tokens, pos) == :end_kw do
+    pos = pos + 1
+  end
+  node_idx = np
+  np = alloc_node(pool, np, :defstruct, cs, cp - cs, 0, name, line, col)
+  return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
+end
+
+# ---- parse_fn_decl -----------------------------------------------------------
+
+defp parse_fn_decl(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+  line = tok_line(tokens, pos)
+  col  = tok_col(tokens, pos)
+  pos  = pos + 1  # consume def/defp
+  name = tok_lex(tokens, pos)
+  pos  = pos + 1  # consume name
+  ps   = cp
+  if tok_kind(tokens, pos) == :lparen do
+    pos = pos + 1
+    while tok_kind(tokens, pos) != :rparen and tok_kind(tokens, pos) != :eof do
+      pname = tok_lex(tokens, pos)
+      pline = tok_line(tokens, pos)
+      pcol  = tok_col(tokens, pos)
+      pos   = pos + 1
+      tname = ""
+      if tok_kind(tokens, pos) == :colon_colon do
+        pos  = pos + 1
+        ta   = parse_type_ann(tokens, pos)
+        tname = ta.name
+        pos   = ta.pos
+      end
+      param_idx = np
+      np = alloc_node(pool, np, :param, 0, 0, 0, pname, pline, pcol)
+      type_idx  = np
+      np = alloc_node(pool, np, :type_ref, 0, 0, 0, tname, pline, pcol)
+      pool.set(param_idx, Node{ tag: :param, a: type_idx, b: 0, c: 0, name: pname, line: pline, col: pcol })
+      ch.set(cp, param_idx)
+      cp = cp + 1
+      if tok_kind(tokens, pos) == :comma do
+        pos = pos + 1
+      end
+    end
+    if tok_kind(tokens, pos) == :rparen do
+      pos = pos + 1
+    end
+  end
+  pe       = cp
+  ret_type = ""
+  if tok_kind(tokens, pos) == :colon_colon do
+    pos  = pos + 1
+    ta   = parse_type_ann(tokens, pos)
+    ret_type = ta.name
+    pos      = ta.pos
+  end
+  pos = skip_newlines(tokens, pos)
+  if tok_kind(tokens, pos) == :do_kw do
+    pos = pos + 1
+  end
+  r    = parse_block_body(tokens, pool, np, ch, cp, pos)
+  pos  = r.pos
+  np   = r.np
+  cp   = r.cp
+  body = r.node_idx
+  if tok_kind(tokens, pos) == :end_kw do
+    pos = pos + 1
+  end
+  full_name = str_concat(name, str_concat("::", ret_type))
+  node_idx  = np
+  np = alloc_node(pool, np, :fn_decl, ps, pe - ps, body, full_name, line, col)
+  return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
+end
+
+# ---- parse_file --------------------------------------------------------------
+
+defp parse_file(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+  pos = skip_newlines(tokens, pos)
+  cs  = cp
+  while tok_kind(tokens, pos) != :eof do
+    k = tok_kind(tokens, pos)
+    if k == :def_kw or k == :defp_kw do
+      r   = parse_fn_decl(tokens, pool, np, ch, cp, pos)
+      pos = r.pos
+      np  = r.np
+      cp  = r.cp
+      di  = r.node_idx
+      if di != -1 do
+        ch.set(cp, di)
+        cp = cp + 1
+      end
+    end
+    if k == :defstruct_kw do
+      r   = parse_defstruct(tokens, pool, np, ch, cp, pos)
+      pos = r.pos
+      np  = r.np
+      cp  = r.cp
+      di  = r.node_idx
+      if di != -1 do
+        ch.set(cp, di)
+        cp = cp + 1
+      end
+    end
+    if k == :at_ident do
+      at_name  = tok_lex(tokens, pos)
+      at_line  = tok_line(tokens, pos)
+      at_col   = tok_col(tokens, pos)
+      pos      = pos + 1
+      # Parse :: lifetime annotation (e.g. :: script, :: frame, :: persistent)
+      # Store lifetime in node.b: 1=frame, 2=script, 3=persistent, 0=unknown
+      at_lifetime = 0
+      if tok_kind(tokens, pos) == :colon_colon do
+        pos = pos + 1  # skip ::
+        if tok_kind(tokens, pos) == :ident do
+          lt_name = tok_lex(tokens, pos)
+          if lt_name == "frame"      do at_lifetime = 1 end
+          if lt_name == "script"     do at_lifetime = 2 end
+          if lt_name == "persistent" do at_lifetime = 3 end
+          pos = pos + 1  # skip lifetime name
+        end
+      end
+      if tok_kind(tokens, pos) == :eq do
+        pos = pos + 1
+      end
+      r   = parse_expr(tokens, pool, np, ch, cp, pos)
+      pos = r.pos
+      np  = r.np
+      cp  = r.cp
+      val = r.node_idx
+      di  = np
+      np  = alloc_node(pool, np, :at_decl, val, at_lifetime, 0, at_name, at_line, at_col)
+      ch.set(cp, di)
+      cp = cp + 1
+    end
+    if k == :import_kw do
+      imp_line = tok_line(tokens, pos)
+      imp_col  = tok_col(tokens, pos)
+      pos      = pos + 1
+      path_raw = tok_lex(tokens, pos)
+      pos      = pos + 1
+      path     = str_slice(path_raw, 1, str_len(path_raw) - 1)
+      di       = np
+      np       = alloc_node(pool, np, :import_decl, 0, 0, 0, path, imp_line, imp_col)
+      ch.set(cp, di)
+      cp       = cp + 1
+    end
+    if k == :enum_kw do
+      enum_line = tok_line(tokens, pos)
+      enum_col  = tok_col(tokens, pos)
+      pos       = pos + 1
+      enum_name = tok_lex(tokens, pos)
+      pos       = pos + 1
+      if tok_kind(tokens, pos) == :lbrace do
+        pos = pos + 1
+      end
+      pos = skip_newlines(tokens, pos)
+      # Collect variant nodes first, then write them into ch[] contiguously
+      vlist :: []int = []
+      while tok_kind(tokens, pos) != :rbrace and tok_kind(tokens, pos) != :eof do
+        v_name = tok_lex(tokens, pos)
+        v_line = tok_line(tokens, pos)
+        v_col  = tok_col(tokens, pos)
+        pos    = pos + 1
+        # Skip optional payload parens — parse but don't store in ch[]
+        # Store payload count in node.b; payload type names joined in node.name
+        payload_count = 0
+        payload_types = ""
+        if tok_kind(tokens, pos) == :lparen do
+          pos = pos + 1
+          while tok_kind(tokens, pos) != :rparen and tok_kind(tokens, pos) != :eof do
+            ta    = parse_type_ann(tokens, pos)
+            pos   = ta.pos
+            if payload_count > 0 do
+              payload_types = str_concat(payload_types, ",")
+            end
+            payload_types = str_concat(payload_types, ta.name)
+            payload_count = payload_count + 1
+            if tok_kind(tokens, pos) == :comma do
+              pos = pos + 1
+            end
+          end
+          if tok_kind(tokens, pos) == :rparen do
+            pos = pos + 1
+          end
+        end
+        # Encode: name = "VariantName" or "VariantName:type1,type2"
+        full_v_name = v_name
+        if payload_count > 0 do
+          full_v_name = str_concat(v_name, str_concat(":", payload_types))
+        end
+        vi = np
+        np = alloc_node(pool, np, :enum_variant, 0, payload_count, 0, full_v_name, v_line, v_col)
+        vlist.push(vi)
+        if tok_kind(tokens, pos) == :comma do
+          pos = pos + 1
+        end
+        pos = skip_newlines(tokens, pos)
+      end
+      if tok_kind(tokens, pos) == :rbrace do
+        pos = pos + 1
+      end
+      vs = cp
+      i  = 0
+      while i < vlist.len do
+        ch.set(cp, vlist.get(i))
+        cp = cp + 1
+        i  = i + 1
+      end
+      di = np
+      np = alloc_node(pool, np, :enum_decl, vs, vlist.len, 0, enum_name, enum_line, enum_col)
+      ch.set(cp, di)
+      cp = cp + 1
+    end
+    if k == :extern_kw do
+      ext_line = tok_line(tokens, pos)
+      ext_col  = tok_col(tokens, pos)
+      pos      = pos + 1
+      pos      = pos + 1
+      ext_name = tok_lex(tokens, pos)
+      pos      = pos + 1
+      ps = cp
+      if tok_kind(tokens, pos) == :lparen do
+        pos = pos + 1
+        while tok_kind(tokens, pos) != :rparen and tok_kind(tokens, pos) != :eof do
+          pname = tok_lex(tokens, pos)
+          pline = tok_line(tokens, pos)
+          pcol  = tok_col(tokens, pos)
+          pos   = pos + 1
+          tname = ""
+          if tok_kind(tokens, pos) == :colon do
+            pos  = pos + 1
+            ta   = parse_type_ann(tokens, pos)
+            tname = ta.name
+            pos   = ta.pos
+          end
+          param_idx = np
+          np = alloc_node(pool, np, :param, 0, 0, 0, pname, pline, pcol)
+          type_idx  = np
+          np = alloc_node(pool, np, :type_ref, 0, 0, 0, tname, pline, pcol)
+          pool.set(param_idx, Node{ tag: :param, a: type_idx, b: 0, c: 0, name: pname, line: pline, col: pcol })
+          ch.set(cp, param_idx)
+          cp = cp + 1
+          if tok_kind(tokens, pos) == :comma do
+            pos = pos + 1
+          end
+        end
+        if tok_kind(tokens, pos) == :rparen do
+          pos = pos + 1
+        end
+      end
+      pe = cp
+      ext_ret = "void"
+      if tok_kind(tokens, pos) == :arrow do
+        pos     = pos + 1
+        ext_ret = tok_lex(tokens, pos)
+        pos     = pos + 1
+      end
+      if tok_kind(tokens, pos) == :eq do
+        pos = pos + 1
+        if tok_kind(tokens, pos) == :string_lit do
+          pos = pos + 1
+        end
+      end
+      full_name = str_concat(ext_name, str_concat("::", ext_ret))
+      di        = np
+      np        = alloc_node(pool, np, :extern_decl, ps, pe - ps, -1, full_name, ext_line, ext_col)
+      ch.set(cp, di)
+      cp        = cp + 1
+    end
+    if k != :def_kw and k != :defp_kw and k != :defstruct_kw and k != :at_ident and k != :import_kw and k != :extern_kw and k != :enum_kw do
+      # Top-level statement (scripting style): parse and store as :toplevel_stmt
+      tl_line = tok_line(tokens, pos)
+      tl_col  = tok_col(tokens, pos)
+      r   = parse_stmt(tokens, pool, np, ch, cp, pos)
+      pos = r.pos
+      np  = r.np
+      cp  = r.cp
+      si  = r.node_idx
+      if si != -1 do
+        tl_idx = np
+        np = alloc_node(pool, np, :toplevel_stmt, si, 0, 0, "", tl_line, tl_col)
+        ch.set(cp, tl_idx)
+        cp = cp + 1
+      end
+    end
+    pos = skip_newlines(tokens, pos)
+  end
+  root = np
+  np   = alloc_node(pool, np, :block, cs, cp - cs, 0, "", 0, 0)
+  return ParseResult{ pos: pos, np: np, cp: cp, node_idx: root }
+end
