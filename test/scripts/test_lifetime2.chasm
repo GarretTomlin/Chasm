@@ -4,6 +4,6 @@
 
 def update() do
   @ticks = @ticks + 1
-  @cache = @ticks
-  @saved = @cache
+  @cache = copy_to_script(@ticks)
+  @saved = persist_copy(@cache)
 end

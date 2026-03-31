@@ -3,6 +3,6 @@
 
 def on_tick(dt :: float) do
   computed = 42
-  @score = computed
-  @high_score = computed
+  @score = copy_to_script(computed)
+  @high_score = persist_copy(computed)
 end
