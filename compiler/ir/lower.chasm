@@ -1,6 +1,97 @@
 # ---- IR lowering pass (parse tree → IRProg) ----------------------------------
-# Populated in subsequent tasks.
 
-defp make_lctx_stub() :: int do
-  return 0
+# ---- LowerCtx constructor -----------------------------------------------------
+
+defp make_lctx(pool :: []Node, ch :: []int, types :: []int,
+               structs :: []StructDef, fields :: []FieldDef) :: LowerCtx do
+  empty_op :: IROp = IROp{ op: :nop, dst: IRVal{ tmp: "", tid: 0, elem_tid: 0 },
+    a: IRVal{ tmp: "", tid: 0, elem_tid: 0 },
+    b: IRVal{ tmp: "", tid: 0, elem_tid: 0 },
+    name: "", ai: 0, ac: 0, line: 0, col: 0 }
+  empty_arg :: IRVal = IRVal{ tmp: "", tid: 0, elem_tid: 0 }
+  ops :: []IROp = []
+  i = 0
+  while i < 65536 do ops.push(empty_op) i = i + 1 end
+  args :: []IRVal = []
+  i = 0
+  while i < 16384 do args.push(empty_arg) i = i + 1 end
+  op_len :: []int = []
+  op_len.push(0)
+  arg_len :: []int = []
+  arg_len.push(0)
+  tc :: []int = []
+  tc.push(0)
+  vars :: []VarElem = make_ve_pool(2048)
+  var_len :: []int = []
+  var_len.push(0)
+  return LowerCtx{ pool: pool, ch: ch, types: types, structs: structs,
+    fields: fields, ops: ops, op_len: op_len, args: args,
+    arg_len: arg_len, tc: tc, vars: vars, var_len: var_len }
+end
+
+# ---- Emit one IROp into the op pool ------------------------------------------
+
+defp lctx_emit(lctx :: LowerCtx, op :: IROp) do
+  n = lctx.op_len.get(0)
+  lctx.ops.set(n, op)
+  lctx.op_len.set(0, n + 1)
+end
+
+# ---- Allocate fresh typed temporaries ----------------------------------------
+
+defp lctx_tmp(lctx :: LowerCtx, tid :: int) :: IRVal do
+  n = lctx.tc.get(0)
+  lctx.tc.set(0, n + 1)
+  return IRVal{ tmp: str_concat("t", int_to_str(n)), tid: tid, elem_tid: 0 }
+end
+
+defp lctx_tmp_arr(lctx :: LowerCtx, elem_tid :: int) :: IRVal do
+  n = lctx.tc.get(0)
+  lctx.tc.set(0, n + 1)
+  return IRVal{ tmp: str_concat("t", int_to_str(n)), tid: @TID_ARRAY, elem_tid: elem_tid }
+end
+
+# ---- Push one arg into the arg pool; return its index ------------------------
+
+defp lctx_push_arg(lctx :: LowerCtx, v :: IRVal) :: int do
+  n = lctx.arg_len.get(0)
+  lctx.args.set(n, v)
+  lctx.arg_len.set(0, n + 1)
+  return n
+end
+
+# ---- Record a declared variable (name + elem_tid for arrays) -----------------
+
+defp lctx_declare(lctx :: LowerCtx, name :: string, elem_tid :: int) do
+  n = lctx.var_len.get(0)
+  ve_push(lctx.vars, n, name, elem_tid)
+  lctx.var_len.set(0, n + 1)
+end
+
+defp lctx_is_declared(lctx :: LowerCtx, name :: string) :: bool do
+  return ve_declared(lctx.vars, lctx.var_len.get(0), name)
+end
+
+defp lctx_elem_tid(lctx :: LowerCtx, name :: string) :: int do
+  return ve_lookup(lctx.vars, lctx.var_len.get(0), name)
+end
+
+# ---- IRVal shorthands --------------------------------------------------------
+
+defp irval_void() :: IRVal do
+  return IRVal{ tmp: "", tid: @TID_VOID, elem_tid: 0 }
+end
+
+defp irval_name(name :: string, tid :: int) :: IRVal do
+  return IRVal{ tmp: name, tid: tid, elem_tid: 0 }
+end
+
+defp irval_name_arr(name :: string, elem_tid :: int) :: IRVal do
+  return IRVal{ tmp: name, tid: @TID_ARRAY, elem_tid: elem_tid }
+end
+
+# ---- Snapshot op count (used by IRFn construction) ---------------------------
+
+defp lctx_op_count(lctx :: LowerCtx) :: int do
+  return lctx.op_len.get(0)
 end
