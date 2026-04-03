@@ -95,3 +95,90 @@ end
 defp lctx_op_count(lctx :: LowerCtx) :: int do
   return lctx.op_len.get(0)
 end
+
+# ---- lower_expr: walk one expression node, emit ops, return result IRVal -----
+
+defp lower_expr(lctx :: LowerCtx, idx :: int) :: IRVal do
+  if idx < 0 do return irval_void() end
+  node :: Node = lctx.pool.get(idx)
+  tag  = node.tag
+  tid  = lctx.types.get(idx)
+
+  if tag == :int_lit do
+    dst = lctx_tmp(lctx, @TID_INT)
+    lctx_emit(lctx, IROp{ op: :lit_int, dst: dst, a: irval_void(), b: irval_void(),
+      name: node.name, ai: 0, ac: 0, line: node.line, col: node.col })
+    return dst
+  end
+
+  if tag == :float_lit do
+    dst = lctx_tmp(lctx, @TID_FLOAT)
+    lctx_emit(lctx, IROp{ op: :lit_float, dst: dst, a: irval_void(), b: irval_void(),
+      name: node.name, ai: 0, ac: 0, line: node.line, col: node.col })
+    return dst
+  end
+
+  if tag == :string_lit do
+    dst = lctx_tmp(lctx, @TID_STRING)
+    lctx_emit(lctx, IROp{ op: :lit_str, dst: dst, a: irval_void(), b: irval_void(),
+      name: node.name, ai: 0, ac: 0, line: node.line, col: node.col })
+    return dst
+  end
+
+  if tag == :bool_lit do
+    dst = lctx_tmp(lctx, @TID_BOOL)
+    lctx_emit(lctx, IROp{ op: :lit_bool, dst: dst, a: irval_void(), b: irval_void(),
+      name: node.name, ai: 0, ac: 0, line: node.line, col: node.col })
+    return dst
+  end
+
+  if tag == :atom_lit do
+    n = str_len(node.name)
+    inner = str_slice(node.name, 1, n)
+    dst = lctx_tmp(lctx, @TID_ATOM)
+    lctx_emit(lctx, IROp{ op: :lit_atom, dst: dst, a: irval_void(), b: irval_void(),
+      name: inner, ai: 0, ac: 0, line: node.line, col: node.col })
+    return dst
+  end
+
+  if tag == :ident do
+    et = lctx_elem_tid(lctx, node.name)
+    return IRVal{ tmp: node.name, tid: tid, elem_tid: et }
+  end
+
+  if tag == :at_ref do
+    attr_bare = str_slice(node.name, 1, str_len(node.name))
+    dst = lctx_tmp(lctx, tid)
+    lctx_emit(lctx, IROp{ op: :at_read, dst: dst, a: irval_void(), b: irval_void(),
+      name: attr_bare, ai: 0, ac: 0, line: node.line, col: node.col })
+    return dst
+  end
+
+  if tag == :array_lit do
+    cap_s = int_to_str(node.b)
+    dst   = lctx_tmp_arr(lctx, 0)
+    lctx_emit(lctx, IROp{ op: :lit_arr, dst: dst, a: irval_void(), b: irval_void(),
+      name: cap_s, ai: 0, ac: 0, line: node.line, col: node.col })
+    return dst
+  end
+
+  if tag == :binop do
+    la  = lower_expr(lctx, node.a)
+    ra  = lower_expr(lctx, node.b)
+    dst = lctx_tmp(lctx, tid)
+    lctx_emit(lctx, IROp{ op: :binop, dst: dst, a: la, b: ra,
+      name: node.name, ai: 0, ac: 0, line: node.line, col: node.col })
+    return dst
+  end
+
+  if tag == :unary do
+    va  = lower_expr(lctx, node.a)
+    dst = lctx_tmp(lctx, tid)
+    lctx_emit(lctx, IROp{ op: :unop, dst: dst, a: va, b: irval_void(),
+      name: node.name, ai: 0, ac: 0, line: node.line, col: node.col })
+    return dst
+  end
+
+  # Remaining expression cases added in Tasks 5-7
+  return irval_void()
+end
