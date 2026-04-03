@@ -91,7 +91,7 @@ defp emit_stmt(cctx :: CCtx,
     if ve_declared(var_elems, ve_len, node.name) == false do
       ve_len = ve_push(var_elems, ve_len, node.name, 0)
     end
-    print(str_concat(ind, str_concat(type_c, str_concat(" ", str_concat(node.name, str_concat(" = ", str_concat(val_c, ";")))))))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(type_c, str_concat(" ", str_concat(node.name, str_concat(" = ", str_concat(val_c, ";")))))))
     return ve_len
   end
 
@@ -102,7 +102,7 @@ defp emit_stmt(cctx :: CCtx,
       nm = lhs_node.name
       if ve_declared(var_elems, ve_len, nm) do
         # Reassignment to an already-declared variable.
-        print(str_concat(ind, str_concat(nm, str_concat(" = ", str_concat(val_c, ";")))))
+        sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(nm, str_concat(" = ", str_concat(val_c, ";")))))
       else
         # First use: emit a typed declaration and register the name.
         # cctx.types[idx] holds the assign-node type (set by sema); cctx.types[node.a] (ident) is 0.
@@ -146,7 +146,7 @@ defp emit_stmt(cctx :: CCtx,
           end
         end
         ve_len = ve_push(var_elems, ve_len, nm, et_assign)
-        print(str_concat(ind, str_concat(type_c, str_concat(" ", str_concat(nm, str_concat(" = ", str_concat(val_c, ";")))))))
+        sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(type_c, str_concat(" ", str_concat(nm, str_concat(" = ", str_concat(val_c, ";")))))))
       end
     end
     return ve_len
@@ -154,31 +154,31 @@ defp emit_stmt(cctx :: CCtx,
 
   if tag == :return_stmt do
     if node.a < 0 do
-      print(str_concat(ind, "return;"))
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, "return;"))
     else
       val_c = emit_expr(cctx, var_elems, ve_len, node.a)
-      print(str_concat(ind, str_concat("return ", str_concat(val_c, ";"))))
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("return ", str_concat(val_c, ";"))))
     end
     return ve_len
   end
 
   if tag == :if_stmt do
     cond_c = emit_expr(cctx, var_elems, ve_len, node.a)
-    print(str_concat(ind, str_concat("if (", str_concat(unwrap_cond(cond_c), ") {"))))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("if (", str_concat(unwrap_cond(cond_c), ") {"))))
     _ve = emit_block_body(cctx, var_elems, ve_len, depth + 1, node.b)
     if node.c >= 0 do
-      print(str_concat(ind, "} else {"))
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, "} else {"))
       _ve = emit_block_body(cctx, var_elems, ve_len, depth + 1, node.c)
     end
-    print(str_concat(ind, "}"))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind, "}"))
     return ve_len
   end
 
   if tag == :while_stmt do
     cond_c = emit_expr(cctx, var_elems, ve_len, node.a)
-    print(str_concat(ind, str_concat("while (", str_concat(unwrap_cond(cond_c), ") {"))))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("while (", str_concat(unwrap_cond(cond_c), ") {"))))
     _ve = emit_block_body(cctx, var_elems, ve_len, depth + 1, node.b)
-    print(str_concat(ind, "}"))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind, "}"))
     return ve_len
   end
 
@@ -196,22 +196,22 @@ defp emit_stmt(cctx :: CCtx,
     end
     elem_c   = c_type(elem_tid, cctx.structs)
     esuf     = array_elem_suffix(cctx.structs, elem_tid)
-    print(str_concat(ind, "{"))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind, "{"))
     ind1 = str_concat(ind, "  ")
     # Store iter in a temp to avoid double-evaluation (e.g. range rvalue)
-    print(str_concat(ind1, str_concat("ChasmArray _iter = ", str_concat(iter_c, ";"))))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind1, str_concat("ChasmArray _iter = ", str_concat(iter_c, ";"))))
     # Use C for-loop so continue correctly increments _fi before re-checking condition
-    print(str_concat(ind1, "for (int64_t _fi = 0; _fi < _iter.len; _fi++) {"))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind1, "for (int64_t _fi = 0; _fi < _iter.len; _fi++) {"))
     ind2 = str_concat(ind1, "  ")
-    print(str_concat(ind2, str_concat(elem_c, str_concat(" ", str_concat(var_n, str_concat(" = chasm_array_get", str_concat(esuf, "(ctx, &_iter, _fi);")))))))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind2, str_concat(elem_c, str_concat(" ", str_concat(var_n, str_concat(" = chasm_array_get", str_concat(esuf, "(ctx, &_iter, _fi);")))))))
     _ve = emit_block_body(cctx, var_elems, ve_len, depth + 2, node.b)
-    print(str_concat(ind1, "}"))
-    print(str_concat(ind, "}"))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind1, "}"))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind, "}"))
     return ve_len
   end
 
-  if tag == :break_stmt    do print(str_concat(ind, "break;"))    return ve_len end
-  if tag == :continue_stmt do print(str_concat(ind, "continue;")) return ve_len end
+  if tag == :break_stmt    do sec_emit(cctx, @SEC_BODY, str_concat(ind, "break;"))    return ve_len end
+  if tag == :continue_stmt do sec_emit(cctx, @SEC_BODY, str_concat(ind, "continue;")) return ve_len end
 
   if tag == :at_assign do
     # @name = expr → g_name = expr;
@@ -229,7 +229,7 @@ defp emit_stmt(cctx :: CCtx,
         val_c = str_concat("chasm_str_to_persistent(ctx, ", str_concat(val_c, ")"))
       end
     end
-    print(str_concat(ind, str_concat("g_", str_concat(attr_name, str_concat(" = ", str_concat(val_c, ";"))))))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("g_", str_concat(attr_name, str_concat(" = ", str_concat(val_c, ";"))))))
     return ve_len
   end
 
@@ -246,7 +246,7 @@ defp emit_stmt(cctx :: CCtx,
     end
     ttype = "ChasmTuple2"
     if tcount == 3 do ttype = "ChasmTuple3" end
-    print(str_concat(ind, str_concat(ttype, str_concat(" _t = ", str_concat(rhs_c, ";")))))
+    sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(ttype, str_concat(" _t = ", str_concat(rhs_c, ";")))))
     # Emit each assignment at the same indent level (no wrapping block)
     vi2   = 0
     start2 = 0
@@ -262,10 +262,10 @@ defp emit_stmt(cctx :: CCtx,
         if str_len(vname2) > 0 do
           field_s = str_concat("v", int_to_str(vi2))
           if ve_declared(var_elems, ve_len, vname2) do
-            print(str_concat(ind, str_concat(vname2, str_concat(" = _t.", str_concat(field_s, ";")))))
+            sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(vname2, str_concat(" = _t.", str_concat(field_s, ";")))))
           else
             ve_len = ve_push(var_elems, ve_len, vname2, 0)
-            print(str_concat(ind, str_concat("int64_t ", str_concat(vname2, str_concat(" = _t.", str_concat(field_s, ";"))))))
+            sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("int64_t ", str_concat(vname2, str_concat(" = _t.", str_concat(field_s, ";"))))))
           end
           vi2 = vi2 + 1
         end
@@ -278,6 +278,6 @@ defp emit_stmt(cctx :: CCtx,
 
   # Expression statement
   ec = emit_expr(cctx, var_elems, ve_len, idx)
-  print(str_concat(ind, str_concat(ec, ";")))
+  sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(ec, ";")))
   return ve_len
 end
