@@ -607,7 +607,7 @@ defp codegen(pool :: []Node, ch :: []int, root :: int,
             if fixed_elem_tid > @TID_TUPLE do
               # Struct array — typed init handles allocation size and default seeding
               sn_fixed = struct_name_by_tid(structs, fixed_elem_tid)
-              sec_emit(cctx, @SEC_BODY, str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_fixed_init_", str_concat(sn_fixed, str_concat("(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, str_concat(", ", str_concat(default_c, ");"))))))))))
+              sec_emit(cctx, @SEC_BODY, str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_fixed_init_", str_concat(sn_fixed, str_concat("(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, str_concat(", ", str_concat(default_c, ");")))))))))))
             else
               if fixed_elem_tid == -3 do
                 sec_emit(cctx, @SEC_BODY, str_concat("  g_", str_concat(attr_name, str_concat(" = chasm_array_fixed_in_f(", str_concat(arena_expr, str_concat(", ", str_concat(cap_c, ");")))))))
@@ -619,10 +619,10 @@ defp codegen(pool :: []Node, ch :: []int, root :: int,
             # Seed primitive slots with default value if provided (structs handled above)
             if has_default do
               if fixed_elem_tid == -3 do
-                sec_emit(cctx, @SEC_BODY, str_concat("  { int64_t _cap = ", str_concat(cap_c, str_concat("; for (int64_t _di = 0; _di < _cap; _di++) ((double*)g_", str_concat(attr_name, str_concat(".data)[_di] = ", str_concat(default_c, str_concat("; } g_", str_concat(attr_name, str_concat(".len = ", str_concat(cap_c, ";")))))))))))))
+                sec_emit(cctx, @SEC_BODY, str_concat("  { int64_t _cap = ", str_concat(cap_c, str_concat("; for (int64_t _di = 0; _di < _cap; _di++) ((double*)g_", str_concat(attr_name, str_concat(".data)[_di] = ", str_concat(default_c, str_concat("; } g_", str_concat(attr_name, str_concat(".len = ", str_concat(cap_c, ";")))))))))))
               end
               if fixed_elem_tid == -2 do
-                sec_emit(cctx, @SEC_BODY, str_concat("  { int64_t _cap = ", str_concat(cap_c, str_concat("; for (int64_t _di = 0; _di < _cap; _di++) ((int64_t*)g_", str_concat(attr_name, str_concat(".data)[_di] = ", str_concat(default_c, str_concat("; } g_", str_concat(attr_name, str_concat(".len = ", str_concat(cap_c, ";")))))))))))))
+                sec_emit(cctx, @SEC_BODY, str_concat("  { int64_t _cap = ", str_concat(cap_c, str_concat("; for (int64_t _di = 0; _di < _cap; _di++) ((int64_t*)g_", str_concat(attr_name, str_concat(".data)[_di] = ", str_concat(default_c, str_concat("; } g_", str_concat(attr_name, str_concat(".len = ", str_concat(cap_c, ";")))))))))))
               end
             end
           else
