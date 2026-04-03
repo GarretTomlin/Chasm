@@ -407,7 +407,7 @@ defp parse_primary(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp
   end
   # if/else used as an expression (e.g. x = if cond do a else b end)
   if k == :if_kw do
-    r = parse_if(tokens, pool, np, ch, cp, pos)
+    r = parse_if(tokens, pool, np, ch, cp, pos, dc)
     return r
   end
   d :: Diagnostic = Diagnostic{ code: "E103", category: "syntax error", file: "sema_combined.chasm", line: line, col: col, message: str_concat("unexpected token in expression: `", str_concat(lx, "`")), snippet: "", caret: "", help: "" }

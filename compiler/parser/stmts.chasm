@@ -1,12 +1,12 @@
 
-defp parse_return(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+defp parse_return(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int, dc :: DiagCollector) :: ParseResult do
   line = tok_line(tokens, pos)
   col  = tok_col(tokens, pos)
   pos  = pos + 1
   k    = tok_kind(tokens, pos)
   val  = invalid()
   if k != :newline and k != :end_kw and k != :else_kw and k != :eof do
-    r   = parse_expr(tokens, pool, np, ch, cp, pos)
+    r   = parse_expr(tokens, pool, np, ch, cp, pos, dc)
     pos = r.pos
     np  = r.np
     cp  = r.cp
@@ -17,7 +17,7 @@ defp parse_return(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp 
       val_list.push(val)
       while tok_kind(tokens, pos) == :comma do
         pos = pos + 1
-        r2  = parse_expr(tokens, pool, np, ch, cp, pos)
+        r2  = parse_expr(tokens, pool, np, ch, cp, pos, dc)
         pos = r2.pos
         np  = r2.np
         cp  = r2.cp
@@ -42,11 +42,11 @@ end
 
 # ---- parse_while -------------------------------------------------------------
 
-defp parse_while(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+defp parse_while(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int, dc :: DiagCollector) :: ParseResult do
   line = tok_line(tokens, pos)
   col  = tok_col(tokens, pos)
   pos  = pos + 1
-  r    = parse_expr(tokens, pool, np, ch, cp, pos)
+  r    = parse_expr(tokens, pool, np, ch, cp, pos, dc)
   pos  = r.pos
   np   = r.np
   cp   = r.cp
@@ -54,14 +54,26 @@ defp parse_while(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :
   pos  = skip_newlines(tokens, pos)
   if tok_kind(tokens, pos) == :do_kw do
     pos = pos + 1
+  else
+    err_line = tok_line(tokens, pos)
+    err_col  = tok_col(tokens, pos)
+    d :: Diagnostic = Diagnostic{ code: "E101", category: "syntax error", file: "sema_combined.chasm", line: err_line, col: err_col, message: "expected `do` after `while` condition", snippet: "", caret: "", help: "" }
+    dc = diag_emit(dc, d)
+    pos = sync_to(tokens, pos, true, false)
   end
-  r    = parse_block_body(tokens, pool, np, ch, cp, pos)
+  r    = parse_block_body(tokens, pool, np, ch, cp, pos, dc)
   pos  = r.pos
   np   = r.np
   cp   = r.cp
   body = r.node_idx
   if tok_kind(tokens, pos) == :end_kw do
     pos = pos + 1
+  else
+    err_line = tok_line(tokens, pos)
+    err_col  = tok_col(tokens, pos)
+    d :: Diagnostic = Diagnostic{ code: "E102", category: "syntax error", file: "sema_combined.chasm", line: err_line, col: err_col, message: "expected `end` to close `while`", snippet: "", caret: "", help: "" }
+    dc = diag_emit(dc, d)
+    pos = sync_to(tokens, pos, true, false)
   end
   node_idx = np
   np = alloc_node(pool, np, :while_stmt, cond, body, 0, "", line, col)
@@ -70,7 +82,7 @@ end
 
 # ---- parse_for ---------------------------------------------------------------
 
-defp parse_for(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+defp parse_for(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int, dc :: DiagCollector) :: ParseResult do
   line     = tok_line(tokens, pos)
   col      = tok_col(tokens, pos)
   pos      = pos + 1  # consume for
@@ -79,7 +91,7 @@ defp parse_for(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: 
   if tok_kind(tokens, pos) == :in_kw do
     pos = pos + 1
   end
-  r    = parse_expr(tokens, pool, np, ch, cp, pos)
+  r    = parse_expr(tokens, pool, np, ch, cp, pos, dc)
   pos  = r.pos
   np   = r.np
   cp   = r.cp
@@ -88,7 +100,7 @@ defp parse_for(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: 
   if tok_kind(tokens, pos) == :do_kw do
     pos = pos + 1
   end
-  r    = parse_block_body(tokens, pool, np, ch, cp, pos)
+  r    = parse_block_body(tokens, pool, np, ch, cp, pos, dc)
   pos  = r.pos
   np   = r.np
   cp   = r.cp
@@ -103,11 +115,11 @@ end
 
 # ---- parse_if ----------------------------------------------------------------
 
-defp parse_if(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+defp parse_if(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int, dc :: DiagCollector) :: ParseResult do
   line = tok_line(tokens, pos)
   col  = tok_col(tokens, pos)
   pos  = pos + 1
-  r    = parse_expr(tokens, pool, np, ch, cp, pos)
+  r    = parse_expr(tokens, pool, np, ch, cp, pos, dc)
   pos  = r.pos
   np   = r.np
   cp   = r.cp
@@ -115,8 +127,14 @@ defp parse_if(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: i
   pos  = skip_newlines(tokens, pos)
   if tok_kind(tokens, pos) == :do_kw do
     pos = pos + 1
+  else
+    err_line = tok_line(tokens, pos)
+    err_col  = tok_col(tokens, pos)
+    d :: Diagnostic = Diagnostic{ code: "E101", category: "syntax error", file: "sema_combined.chasm", line: err_line, col: err_col, message: "expected `do` after `if` condition", snippet: "", caret: "", help: "" }
+    dc = diag_emit(dc, d)
+    pos = sync_to(tokens, pos, true, false)
   end
-  r    = parse_block_body(tokens, pool, np, ch, cp, pos)
+  r    = parse_block_body(tokens, pool, np, ch, cp, pos, dc)
   pos  = r.pos
   np   = r.np
   cp   = r.cp
@@ -126,7 +144,7 @@ defp parse_if(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: i
     pos = pos + 1
     pos = skip_newlines(tokens, pos)
     if tok_kind(tokens, pos) == :if_kw do
-      r          = parse_if(tokens, pool, np, ch, cp, pos)
+      r          = parse_if(tokens, pool, np, ch, cp, pos, dc)
       pos        = r.pos
       np         = r.np
       cp         = r.cp
@@ -136,6 +154,12 @@ defp parse_if(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: i
       pos = skip_newlines(tokens, pos)
       if tok_kind(tokens, pos) == :end_kw do
         pos = pos + 1
+      else
+        err_line = tok_line(tokens, pos)
+        err_col  = tok_col(tokens, pos)
+        d :: Diagnostic = Diagnostic{ code: "E102", category: "syntax error", file: "sema_combined.chasm", line: err_line, col: err_col, message: "expected `end` to close `if`", snippet: "", caret: "", help: "" }
+        dc = diag_emit(dc, d)
+        pos = sync_to(tokens, pos, true, false)
       end
       cs = cp
       ch.set(cp, chain_node)
@@ -146,7 +170,7 @@ defp parse_if(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: i
       np = alloc_node(pool, np, :if_stmt, cond, then, else_block, "", line, col)
       return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
     end
-    r          = parse_block_body(tokens, pool, np, ch, cp, pos)
+    r          = parse_block_body(tokens, pool, np, ch, cp, pos, dc)
     pos        = r.pos
     np         = r.np
     cp         = r.cp
@@ -154,6 +178,12 @@ defp parse_if(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: i
   end
   if tok_kind(tokens, pos) == :end_kw do
     pos = pos + 1
+  else
+    err_line = tok_line(tokens, pos)
+    err_col  = tok_col(tokens, pos)
+    d :: Diagnostic = Diagnostic{ code: "E102", category: "syntax error", file: "sema_combined.chasm", line: err_line, col: err_col, message: "expected `end` to close `if`", snippet: "", caret: "", help: "" }
+    dc = diag_emit(dc, d)
+    pos = sync_to(tokens, pos, true, false)
   end
   node_idx = np
   np = alloc_node(pool, np, :if_stmt, cond, then, else_block, "", line, col)
@@ -162,14 +192,14 @@ end
 
 # ---- parse_stmt --------------------------------------------------------------
 
-defp parse_stmt(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+defp parse_stmt(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int, dc :: DiagCollector) :: ParseResult do
   k    = tok_kind(tokens, pos)
   line = tok_line(tokens, pos)
   col  = tok_col(tokens, pos)
-  if k == :return_kw  do return parse_return(tokens, pool, np, ch, cp, pos) end
-  if k == :if_kw      do return parse_if(tokens, pool, np, ch, cp, pos) end
-  if k == :while_kw   do return parse_while(tokens, pool, np, ch, cp, pos) end
-  if k == :for_kw     do return parse_for(tokens, pool, np, ch, cp, pos) end
+  if k == :return_kw  do return parse_return(tokens, pool, np, ch, cp, pos, dc) end
+  if k == :if_kw      do return parse_if(tokens, pool, np, ch, cp, pos, dc) end
+  if k == :while_kw   do return parse_while(tokens, pool, np, ch, cp, pos, dc) end
+  if k == :for_kw     do return parse_for(tokens, pool, np, ch, cp, pos, dc) end
   if k == :break_kw do
     node_idx = np
     np = alloc_node(pool, np, :break_stmt, 0, 0, 0, "", line, col)
@@ -185,7 +215,7 @@ defp parse_stmt(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
   if k == :at_ident and k2 == :eq do
     at_name  = tok_lex(tokens, pos)
     pos      = pos + 2  # @name =
-    r   = parse_expr(tokens, pool, np, ch, cp, pos)
+    r   = parse_expr(tokens, pool, np, ch, cp, pos, dc)
     pos = r.pos
     np  = r.np
     cp  = r.cp
@@ -206,7 +236,7 @@ defp parse_stmt(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
     if tok_kind(tokens, pos) == :eq do
       pos = pos + 1
     end
-    r   = parse_expr(tokens, pool, np, ch, cp, pos)
+    r   = parse_expr(tokens, pool, np, ch, cp, pos, dc)
     pos = r.pos
     np  = r.np
     cp  = r.cp
@@ -223,7 +253,7 @@ defp parse_stmt(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
   if k == :ident and k2 == :eq do
     var_name = tok_lex(tokens, pos)
     pos      = pos + 2  # name =
-    r   = parse_expr(tokens, pool, np, ch, cp, pos)
+    r   = parse_expr(tokens, pool, np, ch, cp, pos, dc)
     pos = r.pos
     np  = r.np
     cp  = r.cp
@@ -250,7 +280,7 @@ defp parse_stmt(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
     if tok_kind(tokens, pos) == :eq do
       pos = pos + 1
     end
-    r   = parse_expr(tokens, pool, np, ch, cp, pos)
+    r   = parse_expr(tokens, pool, np, ch, cp, pos, dc)
     pos = r.pos
     np  = r.np
     cp  = r.cp
@@ -259,7 +289,7 @@ defp parse_stmt(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
     np = alloc_node(pool, np, :tuple_dest, val, 0, 0, names_str, line, col)
     return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
   end
-  return parse_expr(tokens, pool, np, ch, cp, pos)
+  return parse_expr(tokens, pool, np, ch, cp, pos, dc)
 end
 
 # ---- parse_block_body --------------------------------------------------------
@@ -267,12 +297,12 @@ end
 # contiguously at the END of all expression sub-children.  This ensures that
 # block.a..block.a+block.b contains only statement nodes, not sub-expressions.
 
-defp parse_block_body(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+defp parse_block_body(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int, dc :: DiagCollector) :: ParseResult do
   pos       = skip_newlines(tokens, pos)
   stmt_list :: []int = []
   k         = tok_kind(tokens, pos)
   while k != :end_kw and k != :else_kw and k != :eof do
-    r   = parse_stmt(tokens, pool, np, ch, cp, pos)
+    r   = parse_stmt(tokens, pool, np, ch, cp, pos, dc)
     pos = r.pos
     np  = r.np
     cp  = r.cp
@@ -299,7 +329,7 @@ end
 
 # ---- parse_defstruct ---------------------------------------------------------
 
-defp parse_defstruct(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+defp parse_defstruct(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int, dc :: DiagCollector) :: ParseResult do
   line = tok_line(tokens, pos)
   col  = tok_col(tokens, pos)
   pos  = pos + 1  # consume defstruct
@@ -308,6 +338,12 @@ defp parse_defstruct(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, 
   pos  = skip_newlines(tokens, pos)
   if tok_kind(tokens, pos) == :do_kw do
     pos = pos + 1
+  else
+    err_line = tok_line(tokens, pos)
+    err_col  = tok_col(tokens, pos)
+    d :: Diagnostic = Diagnostic{ code: "E101", category: "syntax error", file: "sema_combined.chasm", line: err_line, col: err_col, message: "expected `do` after `defstruct` name", snippet: "", caret: "", help: "" }
+    dc = diag_emit(dc, d)
+    pos = sync_to(tokens, pos, true, false)
   end
   pos = skip_newlines(tokens, pos)
   cs  = cp
@@ -332,7 +368,7 @@ defp parse_defstruct(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, 
     # Skip optional default value: = expr; store node index in field.b
     if tok_kind(tokens, pos) == :eq do
       pos = pos + 1
-      r_def = parse_expr(tokens, pool, np, ch, cp, pos)
+      r_def = parse_expr(tokens, pool, np, ch, cp, pos, dc)
       pos   = r_def.pos
       np    = r_def.np
       def_node_idx = r_def.node_idx
@@ -342,6 +378,12 @@ defp parse_defstruct(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, 
   end
   if tok_kind(tokens, pos) == :end_kw do
     pos = pos + 1
+  else
+    err_line = tok_line(tokens, pos)
+    err_col  = tok_col(tokens, pos)
+    d :: Diagnostic = Diagnostic{ code: "E102", category: "syntax error", file: "sema_combined.chasm", line: err_line, col: err_col, message: "expected `end` to close `defstruct`", snippet: "", caret: "", help: "" }
+    dc = diag_emit(dc, d)
+    pos = sync_to(tokens, pos, false, false)
   end
   node_idx = np
   np = alloc_node(pool, np, :defstruct, cs, cp - cs, 0, name, line, col)
@@ -350,7 +392,7 @@ end
 
 # ---- parse_fn_decl -----------------------------------------------------------
 
-defp parse_fn_decl(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+defp parse_fn_decl(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int, dc :: DiagCollector) :: ParseResult do
   line = tok_line(tokens, pos)
   col  = tok_col(tokens, pos)
   pos  = pos + 1  # consume def/defp
@@ -397,14 +439,26 @@ defp parse_fn_decl(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp
   pos = skip_newlines(tokens, pos)
   if tok_kind(tokens, pos) == :do_kw do
     pos = pos + 1
+  else
+    err_line = tok_line(tokens, pos)
+    err_col  = tok_col(tokens, pos)
+    d :: Diagnostic = Diagnostic{ code: "E101", category: "syntax error", file: "sema_combined.chasm", line: err_line, col: err_col, message: str_concat("expected `do` after function signature for `", str_concat(name, "`")), snippet: "", caret: "", help: "" }
+    dc = diag_emit(dc, d)
+    pos = sync_to(tokens, pos, true, false)
   end
-  r    = parse_block_body(tokens, pool, np, ch, cp, pos)
+  r    = parse_block_body(tokens, pool, np, ch, cp, pos, dc)
   pos  = r.pos
   np   = r.np
   cp   = r.cp
   body = r.node_idx
   if tok_kind(tokens, pos) == :end_kw do
     pos = pos + 1
+  else
+    err_line = tok_line(tokens, pos)
+    err_col  = tok_col(tokens, pos)
+    d :: Diagnostic = Diagnostic{ code: "E102", category: "syntax error", file: "sema_combined.chasm", line: err_line, col: err_col, message: str_concat("expected `end` to close function `", str_concat(name, "`")), snippet: "", caret: "", help: "" }
+    dc = diag_emit(dc, d)
+    pos = sync_to(tokens, pos, false, false)
   end
   full_name = str_concat(name, str_concat("::", ret_type))
   node_idx  = np
@@ -414,13 +468,13 @@ end
 
 # ---- parse_file --------------------------------------------------------------
 
-defp parse_file(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int) :: ParseResult do
+defp parse_file(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp :: int, pos :: int, dc :: DiagCollector) :: ParseResult do
   pos = skip_newlines(tokens, pos)
   cs  = cp
   while tok_kind(tokens, pos) != :eof do
     k = tok_kind(tokens, pos)
     if k == :def_kw or k == :defp_kw do
-      r   = parse_fn_decl(tokens, pool, np, ch, cp, pos)
+      r   = parse_fn_decl(tokens, pool, np, ch, cp, pos, dc)
       pos = r.pos
       np  = r.np
       cp  = r.cp
@@ -431,7 +485,7 @@ defp parse_file(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
       end
     end
     if k == :defstruct_kw do
-      r   = parse_defstruct(tokens, pool, np, ch, cp, pos)
+      r   = parse_defstruct(tokens, pool, np, ch, cp, pos, dc)
       pos = r.pos
       np  = r.np
       cp  = r.cp
@@ -462,7 +516,7 @@ defp parse_file(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
       if tok_kind(tokens, pos) == :eq do
         pos = pos + 1
       end
-      r   = parse_expr(tokens, pool, np, ch, cp, pos)
+      r   = parse_expr(tokens, pool, np, ch, cp, pos, dc)
       pos = r.pos
       np  = r.np
       cp  = r.cp
@@ -608,19 +662,28 @@ defp parse_file(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
       cp        = cp + 1
     end
     if k != :def_kw and k != :defp_kw and k != :defstruct_kw and k != :at_ident and k != :import_kw and k != :extern_kw and k != :enum_kw do
-      # Top-level statement (scripting style): parse and store as :toplevel_stmt
-      tl_line = tok_line(tokens, pos)
-      tl_col  = tok_col(tokens, pos)
-      r   = parse_stmt(tokens, pool, np, ch, cp, pos)
-      pos = r.pos
-      np  = r.np
-      cp  = r.cp
-      si  = r.node_idx
-      if si != -1 do
-        tl_idx = np
-        np = alloc_node(pool, np, :toplevel_stmt, si, 0, 0, "", tl_line, tl_col)
-        ch.set(cp, tl_idx)
-        cp = cp + 1
+      if k == :end_kw or k == :else_kw or k == :do_kw do
+        err_line = tok_line(tokens, pos)
+        err_col  = tok_col(tokens, pos)
+        err_lx   = tok_lex(tokens, pos)
+        d :: Diagnostic = Diagnostic{ code: "E100", category: "syntax error", file: "sema_combined.chasm", line: err_line, col: err_col, message: str_concat("unexpected token at top level: `", str_concat(err_lx, "`")), snippet: "", caret: "", help: "" }
+        dc = diag_emit(dc, d)
+        pos = pos + 1
+      else
+        # Top-level statement (scripting style): parse and store as :toplevel_stmt
+        tl_line = tok_line(tokens, pos)
+        tl_col  = tok_col(tokens, pos)
+        r   = parse_stmt(tokens, pool, np, ch, cp, pos, dc)
+        pos = r.pos
+        np  = r.np
+        cp  = r.cp
+        si  = r.node_idx
+        if si != -1 do
+          tl_idx = np
+          np = alloc_node(pool, np, :toplevel_stmt, si, 0, 0, "", tl_line, tl_col)
+          ch.set(cp, tl_idx)
+          cp = cp + 1
+        end
       end
     end
     pos = skip_newlines(tokens, pos)

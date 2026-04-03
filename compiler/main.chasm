@@ -10,7 +10,8 @@ def main() do
   pool    :: []Node = make_node_pool(60000)
   ch      :: []int  = make_int_pool(120000)
 
-  r    = parse_file(tokens, pool, 0, ch, 0, 0)
+  dc   = make_diag_collector()
+  r    = parse_file(tokens, pool, 0, ch, 0, 0, dc)
   np   = r.np
   root = r.node_idx
 
@@ -20,7 +21,6 @@ def main() do
   structs = collect_struct_list(pool, ch, root, 10)
   fields  = collect_field_list(pool, ch, structs)
   fns     = collect_fn_list(pool, ch, root, structs)
-  dc      = make_diag_collector()
   dc      = sema_all(pool, ch, root, types, syms, fns, structs, fields, src, "sema_combined.chasm", dc)
 
   if diag_has_errors(dc) do
