@@ -1,24 +1,23 @@
-defp emit_expr_call(pool :: []Node, ch :: []int, types :: []int,
-                    structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_expr_call(cctx :: CCtx,
                     var_elems :: []VarElem, ve_len :: int,
                     idx :: int) :: string do
-  node    = pool.get(idx)
+  node :: Node = cctx.pool.get(idx)
   cs      = node.a
   cl      = node.b
   fn_name = node.name
   args_str = ""
   ai = 0
   while ai < cl do
-    arg_idx = ch.get(cs + ai)
-    ac = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arg_idx)
+    arg_idx = cctx.ch.get(cs + ai)
+    ac = emit_expr(cctx, var_elems, ve_len, arg_idx)
     if ai > 0 do args_str = str_concat(args_str, ", ") end
     args_str = str_concat(args_str, ac)
     ai = ai + 1
   end
   if fn_name == "print" do
     if cl == 1 do
-      arg0_idx = ch.get(cs)
-      arg0_tid = types.get(arg0_idx)
+      arg0_idx = cctx.ch.get(cs)
+      arg0_tid = cctx.types.get(arg0_idx)
       if arg0_tid == @TID_FLOAT do return str_concat("chasm_print_f(ctx, ", str_concat(args_str, ")")) end
       if arg0_tid == @TID_BOOL  do return str_concat("chasm_print_b(ctx, ", str_concat(args_str, ")")) end
       if arg0_tid == @TID_STRING or arg0_tid == @TID_ATOM do
@@ -39,19 +38,19 @@ defp emit_expr_call(pool :: []Node, ch :: []int, types :: []int,
   end
   if fn_name == "array_new" do
     if cl == 2 do
-      type_arg_idx = ch.get(cs)
-      type_node    = pool.get(type_arg_idx)
+      type_arg_idx = cctx.ch.get(cs)
+      type_node :: Node = cctx.pool.get(type_arg_idx)
       if type_node.tag == :ident do
         si        = 0
         found_tid = 0
-        while si < structs.len do
-          sd = structs.get(si)
+        while si < cctx.structs.len do
+          sd :: StructDef = cctx.structs.get(si)
           if sd.name == type_node.name do found_tid = sd.type_id end
           si = si + 1
         end
         if found_tid > 0 do
-          cap_arg_idx = ch.get(cs + 1)
-          cap_c       = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, cap_arg_idx)
+          cap_arg_idx = cctx.ch.get(cs + 1)
+          cap_c       = emit_expr(cctx, var_elems, ve_len, cap_arg_idx)
           return str_concat("chasm_array_new_typed(ctx, ", str_concat(cap_c, str_concat(", sizeof(", str_concat(type_node.name, "))"))))
         end
       end
@@ -63,17 +62,16 @@ defp emit_expr_call(pool :: []Node, ch :: []int, types :: []int,
   return str_concat("chasm_", str_concat(fn_name, str_concat("(ctx, ", str_concat(args_str, ")"))))
 end
 
-defp emit_expr_method_call(pool :: []Node, ch :: []int, types :: []int,
-                           structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_expr_method_call(cctx :: CCtx,
                            var_elems :: []VarElem, ve_len :: int,
                            idx :: int) :: string do
-  node      = pool.get(idx)
-  recv_node = pool.get(node.a)
-  recv_c    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
+  node :: Node = cctx.pool.get(idx)
+  recv_node :: Node = cctx.pool.get(node.a)
+  recv_c    = emit_expr(cctx, var_elems, ve_len, node.a)
   mn        = node.name
   cs        = node.b
   cl        = node.c
-  recv_t = types.get(node.a)
+  recv_t = cctx.types.get(node.a)
   if recv_t == @TID_STRING or recv_t == @TID_ATOM do
     if mn == "len" do
       return str_concat("chasm_str_len(ctx, ", str_concat(recv_c, ")"))
@@ -88,32 +86,32 @@ defp emit_expr_method_call(pool :: []Node, ch :: []int, types :: []int,
       return str_concat("chasm_str_trim(ctx, ", str_concat(recv_c, ")"))
     end
     if mn == "repeat" do
-      arg_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(cs))
+      arg_c = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(cs))
       return str_concat("chasm_str_repeat(ctx, ", str_concat(recv_c, str_concat(", ", str_concat(arg_c, ")"))))
     end
     if mn == "slice" do
-      a0 = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(cs))
-      a1 = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(cs + 1))
+      a0 = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(cs))
+      a1 = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(cs + 1))
       return str_concat("chasm_str_slice(ctx, ", str_concat(recv_c, str_concat(", ", str_concat(a0, str_concat(", ", str_concat(a1, ")"))))))
     end
     if mn == "concat" do
-      arg_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(cs))
+      arg_c = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(cs))
       return str_concat("chasm_str_concat(ctx, ", str_concat(recv_c, str_concat(", ", str_concat(arg_c, ")"))))
     end
     if mn == "contains" do
-      arg_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(cs))
+      arg_c = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(cs))
       return str_concat("chasm_str_contains(ctx, ", str_concat(recv_c, str_concat(", ", str_concat(arg_c, ")"))))
     end
     if mn == "starts_with" do
-      arg_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(cs))
+      arg_c = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(cs))
       return str_concat("chasm_str_starts_with(ctx, ", str_concat(recv_c, str_concat(", ", str_concat(arg_c, ")"))))
     end
     if mn == "ends_with" do
-      arg_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(cs))
+      arg_c = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(cs))
       return str_concat("chasm_str_ends_with(ctx, ", str_concat(recv_c, str_concat(", ", str_concat(arg_c, ")"))))
     end
     if mn == "eq" do
-      arg_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(cs))
+      arg_c = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(cs))
       return str_concat("chasm_str_eq(ctx, ", str_concat(recv_c, str_concat(", ", str_concat(arg_c, ")"))))
     end
   end
@@ -132,13 +130,13 @@ defp emit_expr_method_call(pool :: []Node, ch :: []int, types :: []int,
     elem_tid = ve_lookup(var_elems, ve_len, at_bare)
   end
   if recv_node.tag == :field_get do
-    obj_t    = types.get(recv_node.a)
-    elem_tid = field_elem_lookup(fields, obj_t, recv_node.name)
+    obj_t    = cctx.types.get(recv_node.a)
+    elem_tid = field_elem_lookup(cctx.fields, obj_t, recv_node.name)
   end
-  esuf = array_elem_suffix(structs, elem_tid)
+  esuf = array_elem_suffix(cctx.structs, elem_tid)
   if mn == "push" do
-    arg_idx = ch.get(cs)
-    ac = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arg_idx)
+    arg_idx = cctx.ch.get(cs)
+    ac = emit_expr(cctx, var_elems, ve_len, arg_idx)
     if elem_tid == -2 do
       return str_concat("chasm_array_push_fixed(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ac, ")"))))
     end
@@ -148,18 +146,18 @@ defp emit_expr_method_call(pool :: []Node, ch :: []int, types :: []int,
     return str_concat("chasm_array_push", str_concat(esuf, str_concat("(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ac, ")"))))))
   end
   if mn == "get" do
-    arg_idx = ch.get(cs)
-    ac = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arg_idx)
+    arg_idx = cctx.ch.get(cs)
+    ac = emit_expr(cctx, var_elems, ve_len, arg_idx)
     if elem_tid == -3 do
       return str_concat("chasm_array_get_f(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ac, ")"))))
     end
     return str_concat("chasm_array_get", str_concat(esuf, str_concat("(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ac, ")"))))))
   end
   if mn == "set" do
-    i_idx = ch.get(cs)
-    v_idx = ch.get(cs + 1)
-    ic = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, i_idx)
-    vc = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, v_idx)
+    i_idx = cctx.ch.get(cs)
+    v_idx = cctx.ch.get(cs + 1)
+    ic = emit_expr(cctx, var_elems, ve_len, i_idx)
+    vc = emit_expr(cctx, var_elems, ve_len, v_idx)
     if elem_tid == -3 do
       return str_concat("chasm_array_set_f(ctx, &", str_concat(recv_c, str_concat(", ", str_concat(ic, str_concat(", ", str_concat(vc, ")"))))))
     end
@@ -174,16 +172,16 @@ defp emit_expr_method_call(pool :: []Node, ch :: []int, types :: []int,
   # Enum constructor: EnumName.Variant(val) → EnumName_make_Variant(val)
   if recv_node.tag == :ident do
     si = 0
-    while si < structs.len do
-      sd = structs.get(si)
+    while si < cctx.structs.len do
+      sd :: StructDef = cctx.structs.get(si)
       if sd.name == recv_node.name do
-        sn = pool.get(sd.node_idx)
+        sn :: Node = cctx.pool.get(sd.node_idx)
         if sn.tag == :enum_decl do
           args_str = ""
           ai2 = 0
           while ai2 < cl do
-            arg_idx2 = ch.get(cs + ai2)
-            ac2 = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arg_idx2)
+            arg_idx2 = cctx.ch.get(cs + ai2)
+            ac2 = emit_expr(cctx, var_elems, ve_len, arg_idx2)
             if ai2 > 0 do args_str = str_concat(args_str, ", ") end
             args_str = str_concat(args_str, ac2)
             ai2 = ai2 + 1
@@ -206,8 +204,8 @@ defp emit_expr_method_call(pool :: []Node, ch :: []int, types :: []int,
     is_ns_recv = true
     # If it IS a known struct/enum, it's not a namespace
     si2 = 0
-    while si2 < structs.len do
-      sd2 = structs.get(si2)
+    while si2 < cctx.structs.len do
+      sd2 :: StructDef = cctx.structs.get(si2)
       if sd2.name == recv_node.name do is_ns_recv = false end
       si2 = si2 + 1
     end
@@ -216,8 +214,8 @@ defp emit_expr_method_call(pool :: []Node, ch :: []int, types :: []int,
     args_str = ""
     ai = 0
     while ai < cl do
-      arg_idx = ch.get(cs + ai)
-      ac = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arg_idx)
+      arg_idx = cctx.ch.get(cs + ai)
+      ac = emit_expr(cctx, var_elems, ve_len, arg_idx)
       if ai > 0 do args_str = str_concat(args_str, ", ") end
       args_str = str_concat(args_str, ac)
       ai = ai + 1
@@ -230,8 +228,8 @@ defp emit_expr_method_call(pool :: []Node, ch :: []int, types :: []int,
   args_str = ""
   ai3 = 0
   while ai3 < cl do
-    arg_idx3 = ch.get(cs + ai3)
-    ac3 = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arg_idx3)
+    arg_idx3 = cctx.ch.get(cs + ai3)
+    ac3 = emit_expr(cctx, var_elems, ve_len, arg_idx3)
     if ai3 > 0 do args_str = str_concat(args_str, ", ") end
     args_str = str_concat(args_str, ac3)
     ai3 = ai3 + 1
@@ -242,36 +240,35 @@ defp emit_expr_method_call(pool :: []Node, ch :: []int, types :: []int,
   return str_concat(recv_c, str_concat(".", str_concat(mn, str_concat("(", str_concat(args_str, ")")))))
 end
 
-defp emit_expr_struct_lit(pool :: []Node, ch :: []int, types :: []int,
-                          structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_expr_struct_lit(cctx :: CCtx,
                           var_elems :: []VarElem, ve_len :: int,
                           idx :: int) :: string do
-  node        = pool.get(idx)
+  node :: Node = cctx.pool.get(idx)
   cs          = node.a
   cl          = node.b
   struct_name = node.name
   struct_tid_sl = 0
   si_sl = 0
-  while si_sl < structs.len do
-    sd_sl = structs.get(si_sl)
+  while si_sl < cctx.structs.len do
+    sd_sl :: StructDef = cctx.structs.get(si_sl)
     if sd_sl.name == struct_name do struct_tid_sl = sd_sl.type_id end
     si_sl = si_sl + 1
   end
   flds_c      = ""
   field_count = 0
   fdi_sl      = 0
-  while fdi_sl < fields.len do
-    fd_sl = fields.get(fdi_sl)
+  while fdi_sl < cctx.fields.len do
+    fd_sl :: FieldDef = cctx.fields.get(fdi_sl)
     if fd_sl.struct_tid == struct_tid_sl do
       is_provided = 0
       provided_c  = ""
       pi = 0
       while pi < cl do
-        field_node_idx = ch.get(cs + pi)
-        fnode          = pool.get(field_node_idx)
+        field_node_idx = cctx.ch.get(cs + pi)
+        fnode :: Node = cctx.pool.get(field_node_idx)
         if fnode.name == fd_sl.name do
           is_provided = 1
-          provided_c  = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, fnode.a)
+          provided_c  = emit_expr(cctx, var_elems, ve_len, fnode.a)
         end
         pi = pi + 1
       end
@@ -282,7 +279,7 @@ defp emit_expr_struct_lit(pool :: []Node, ch :: []int, types :: []int,
         emit_field = 1
       else
         if fd_sl.default_node_idx >= 0 do
-          val_c      = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, fd_sl.default_node_idx)
+          val_c      = emit_expr(cctx, var_elems, ve_len, fd_sl.default_node_idx)
           emit_field = 1
         end
       end
@@ -297,17 +294,16 @@ defp emit_expr_struct_lit(pool :: []Node, ch :: []int, types :: []int,
   return str_concat("(", str_concat(struct_name, str_concat("){ ", str_concat(flds_c, " }"))))
 end
 
-defp emit_expr_struct_update(pool :: []Node, ch :: []int, types :: []int,
-                             structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_expr_struct_update(cctx :: CCtx,
                              var_elems :: []VarElem, ve_len :: int,
                              idx :: int) :: string do
-  node        = pool.get(idx)
+  node :: Node = cctx.pool.get(idx)
   struct_name = node.name
-  base_c      = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
+  base_c      = emit_expr(cctx, var_elems, ve_len, node.a)
   struct_tid  = 0
   si          = 0
-  while si < structs.len do
-    sd = structs.get(si)
+  while si < cctx.structs.len do
+    sd :: StructDef = cctx.structs.get(si)
     if sd.name == struct_name do
       struct_tid = sd.type_id
     end
@@ -316,18 +312,18 @@ defp emit_expr_struct_update(pool :: []Node, ch :: []int, types :: []int,
   flds_c      = ""
   field_count = 0
   fdi         = 0
-  while fdi < fields.len do
-    fd = fields.get(fdi)
+  while fdi < cctx.fields.len do
+    fd :: FieldDef = cctx.fields.get(fdi)
     if fd.struct_tid == struct_tid do
       is_overridden = 0
       override_c    = ""
       oi            = 0
       while oi < node.c do
-        field_node_idx = ch.get(node.b + oi)
-        fnode = pool.get(field_node_idx)
+        field_node_idx = cctx.ch.get(node.b + oi)
+        fnode :: Node = cctx.pool.get(field_node_idx)
         if fnode.name == fd.name do
           is_overridden = 1
-          override_c    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, fnode.a)
+          override_c    = emit_expr(cctx, var_elems, ve_len, fnode.a)
         end
         oi = oi + 1
       end
@@ -346,22 +342,21 @@ defp emit_expr_struct_update(pool :: []Node, ch :: []int, types :: []int,
   return str_concat("(", str_concat(struct_name, str_concat("){ ", str_concat(flds_c, " }"))))
 end
 
-defp emit_expr_match(pool :: []Node, ch :: []int, types :: []int,
-                     structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_expr_match(cctx :: CCtx,
                      var_elems :: []VarElem, ve_len :: int,
                      idx :: int) :: string do
-  node      = pool.get(idx)
-  subj_c    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
-  subj_t    = types.get(node.a)
+  node :: Node = cctx.pool.get(idx)
+  subj_c    = emit_expr(cctx, var_elems, ve_len, node.a)
+  subj_t    = cctx.types.get(node.a)
   arm_start = node.b
   arm_count = node.c
   if arm_count == 0 do return "0" end
-  last_node = pool.get(ch.get(arm_start + arm_count - 1))
-  result    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, last_node.a)
+  last_node :: Node = cctx.pool.get(cctx.ch.get(arm_start + arm_count - 1))
+  result    = emit_expr(cctx, var_elems, ve_len, last_node.a)
   idx2 = arm_count - 2
   while idx2 >= 0 do
-    arm_node    = pool.get(ch.get(arm_start + idx2))
-    arm_val_c   = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arm_node.a)
+    arm_node :: Node = cctx.pool.get(cctx.ch.get(arm_start + idx2))
+    arm_val_c   = emit_expr(cctx, var_elems, ve_len, arm_node.a)
     pat_lex     = arm_node.name
     binding_idx = arm_node.b
     if pat_lex != "_" do
@@ -395,8 +390,8 @@ defp emit_expr_match(pool :: []Node, ch :: []int, types :: []int,
             if subj_t > @TID_TUPLE do
               enum_name_m = ""
               si_m = 0
-              while si_m < structs.len do
-                sd_m = structs.get(si_m)
+              while si_m < cctx.structs.len do
+                sd_m :: StructDef = cctx.structs.get(si_m)
                 if sd_m.type_id == subj_t do enum_name_m = sd_m.name end
                 si_m = si_m + 1
               end
@@ -409,7 +404,7 @@ defp emit_expr_match(pool :: []Node, ch :: []int, types :: []int,
         end
       end
       if binding_idx >= 0 do
-        bind_node    = pool.get(binding_idx)
+        bind_node :: Node = cctx.pool.get(binding_idx)
         bind_name    = bind_node.name
         dot_pos2 = -1
         pi2 = 0
@@ -428,15 +423,15 @@ defp emit_expr_match(pool :: []Node, ch :: []int, types :: []int,
         end
         extract = str_concat(subj_c, str_concat(".", str_concat(variant_name2, ".v")))
         si_ep = 0
-        while si_ep < structs.len do
-          sd_ep = structs.get(si_ep)
-          sn_ep = pool.get(sd_ep.node_idx)
+        while si_ep < cctx.structs.len do
+          sd_ep :: StructDef = cctx.structs.get(si_ep)
+          sn_ep :: Node = cctx.pool.get(sd_ep.node_idx)
           if sn_ep.tag == :enum_decl do
             vs_ep = sn_ep.a
             vl_ep = sn_ep.b
             vi_ep = 0
             while vi_ep < vl_ep do
-              vnode_ep = pool.get(ch.get(vs_ep + vi_ep))
+              vnode_ep :: Node = cctx.pool.get(cctx.ch.get(vs_ep + vi_ep))
               raw_ep   = vnode_ep.name
               colon_ep = -1
               ci_ep = 0
@@ -473,13 +468,12 @@ defp emit_expr_match(pool :: []Node, ch :: []int, types :: []int,
   return result
 end
 
-defp emit_expr_pipe(pool :: []Node, ch :: []int, types :: []int,
-                    structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_expr_pipe(cctx :: CCtx,
                     var_elems :: []VarElem, ve_len :: int,
                     idx :: int) :: string do
-  node     = pool.get(idx)
-  lhs_c    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
-  rhs_node = pool.get(node.b)
+  node :: Node = cctx.pool.get(idx)
+  lhs_c    = emit_expr(cctx, var_elems, ve_len, node.a)
+  rhs_node :: Node = cctx.pool.get(node.b)
   if rhs_node.tag == :call do
     fn_name  = rhs_node.name
     cs       = rhs_node.a
@@ -487,64 +481,61 @@ defp emit_expr_pipe(pool :: []Node, ch :: []int, types :: []int,
     args_str = lhs_c
     ai = 0
     while ai < cl do
-      arg_idx = ch.get(cs + ai)
-      ac = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, arg_idx)
+      arg_idx = cctx.ch.get(cs + ai)
+      ac = emit_expr(cctx, var_elems, ve_len, arg_idx)
       args_str = str_concat(args_str, str_concat(", ", ac))
       ai = ai + 1
     end
     return str_concat("chasm_", str_concat(fn_name, str_concat("(ctx, ", str_concat(args_str, ")"))))
   end
-  return emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.b)
+  return emit_expr(cctx, var_elems, ve_len, node.b)
 end
 
-defp emit_expr_interp(pool :: []Node, ch :: []int, types :: []int,
-                      structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_expr_interp(cctx :: CCtx,
                       var_elems :: []VarElem, ve_len :: int,
                       idx :: int) :: string do
-  node    = pool.get(idx)
-  inner_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
-  inner_t = types.get(node.a)
+  node :: Node = cctx.pool.get(idx)
+  inner_c = emit_expr(cctx, var_elems, ve_len, node.a)
+  inner_t = cctx.types.get(node.a)
   if inner_t == @TID_STRING do return inner_c end
   if inner_t == @TID_FLOAT  do return str_concat("chasm_float_to_str(ctx, ", str_concat(inner_c, ")")) end
   if inner_t == @TID_BOOL   do return str_concat("chasm_bool_to_str(ctx, ", str_concat(inner_c, ")")) end
   return str_concat("chasm_int_to_str(ctx, ", str_concat(inner_c, ")"))
 end
 
-defp emit_expr_tuple_lit(pool :: []Node, ch :: []int, types :: []int,
-                         structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_expr_tuple_lit(cctx :: CCtx,
                          var_elems :: []VarElem, ve_len :: int,
                          idx :: int) :: string do
-  node = pool.get(idx)
+  node :: Node = cctx.pool.get(idx)
   ts = node.a
   tl = node.b
   if tl == 2 do
-    v0 = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(ts))
-    v1 = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(ts + 1))
+    v0 = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(ts))
+    v1 = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(ts + 1))
     return str_concat("(ChasmTuple2){", str_concat(v0, str_concat(", ", str_concat(v1, "}"))))
   end
   if tl == 3 do
-    v0 = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(ts))
-    v1 = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(ts + 1))
-    v2 = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, ch.get(ts + 2))
+    v0 = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(ts))
+    v1 = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(ts + 1))
+    v2 = emit_expr(cctx, var_elems, ve_len, cctx.ch.get(ts + 2))
     return str_concat("(ChasmTuple3){", str_concat(v0, str_concat(", ", str_concat(v1, str_concat(", ", str_concat(v2, "}"))))))
   end
   return "0"
 end
 
-defp emit_expr_if_value(pool :: []Node, ch :: []int, types :: []int,
-                        structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_expr_if_value(cctx :: CCtx,
                         var_elems :: []VarElem, ve_len :: int,
                         idx :: int) :: string do
-  node      = pool.get(idx)
-  cond_c    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
-  then_node = pool.get(node.b)
-  then_last = ch.get(then_node.a + then_node.b - 1)
-  then_c    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, then_last)
+  node :: Node = cctx.pool.get(idx)
+  cond_c    = emit_expr(cctx, var_elems, ve_len, node.a)
+  then_node :: Node = cctx.pool.get(node.b)
+  then_last = cctx.ch.get(then_node.a + then_node.b - 1)
+  then_c    = emit_expr(cctx, var_elems, ve_len, then_last)
   else_c    = "0"
   if node.c >= 0 do
-    else_node = pool.get(node.c)
-    else_last = ch.get(else_node.a + else_node.b - 1)
-    else_c    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, else_last)
+    else_node :: Node = cctx.pool.get(node.c)
+    else_last = cctx.ch.get(else_node.a + else_node.b - 1)
+    else_c    = emit_expr(cctx, var_elems, ve_len, else_last)
   end
   return str_concat("(", str_concat(unwrap_cond(cond_c), str_concat(" ? ", str_concat(then_c, str_concat(" : ", str_concat(else_c, ")"))))))
 end
@@ -553,12 +544,11 @@ end
 # Forward declared via mutual reference; emit_stmt calls emit_block_body
 # which calls emit_stmt; emit_expr is self-recursive.
 
-defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
-               structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_expr(cctx :: CCtx,
                var_elems :: []VarElem, ve_len :: int,
                idx :: int) :: string do
   if idx < 0 do return "0" end
-  node = pool.get(idx)
+  node :: Node = cctx.pool.get(idx)
   tag  = node.tag
 
   if tag == :int_lit    do return node.name end
@@ -589,10 +579,10 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :binop do
-    lc  = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
-    rc  = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.b)
+    lc  = emit_expr(cctx, var_elems, ve_len, node.a)
+    rc  = emit_expr(cctx, var_elems, ve_len, node.b)
     op  = node.name
-    lt  = types.get(node.a)
+    lt  = cctx.types.get(node.a)
     cop = op
     if op == "and" do cop = "&&" end
     if op == "or"  do cop = "||" end
@@ -608,22 +598,22 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :unary do
-    sc = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
+    sc = emit_expr(cctx, var_elems, ve_len, node.a)
     if node.name == "not" do return str_concat("!(", str_concat(sc, ")")) end
     return str_concat("-(", str_concat(sc, ")"))
   end
 
   if tag == :call do
-    return emit_expr_call(pool, ch, types, structs, fns, fields, var_elems, ve_len, idx)
+    return emit_expr_call(cctx, var_elems, ve_len, idx)
   end
 
   if tag == :method_call do
-    return emit_expr_method_call(pool, ch, types, structs, fns, fields, var_elems, ve_len, idx)
+    return emit_expr_method_call(cctx, var_elems, ve_len, idx)
   end
 
   if tag == :field_get do
-    obj_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
-    obj_t = types.get(node.a)
+    obj_c = emit_expr(cctx, var_elems, ve_len, node.a)
+    obj_t = cctx.types.get(node.a)
     # String .len → chasm_str_len
     if obj_t == @TID_STRING or obj_t == @TID_ATOM do
       if node.name == "len" do
@@ -631,13 +621,13 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
       end
     end
     # Check if the object is an enum type — emit EnumName_Variant
-    obj_node = pool.get(node.a)
+    obj_node :: Node = cctx.pool.get(node.a)
     if obj_node.tag == :ident do
       si = 0
-      while si < structs.len do
-        sd = structs.get(si)
+      while si < cctx.structs.len do
+        sd :: StructDef = cctx.structs.get(si)
         if sd.name == obj_node.name do
-          sn = pool.get(sd.node_idx)
+          sn :: Node = cctx.pool.get(sd.node_idx)
           if sn.tag == :enum_decl do
             return str_concat(sd.name, str_concat("_", node.name))
           end
@@ -649,9 +639,9 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :index do
-    obj_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
-    idx_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.b)
-    obj_t = types.get(node.a)
+    obj_c = emit_expr(cctx, var_elems, ve_len, node.a)
+    idx_c = emit_expr(cctx, var_elems, ve_len, node.b)
+    obj_t = cctx.types.get(node.a)
     # String indexing: s[i] → chasm_str_char_at(ctx, s, i)
     if obj_t == @TID_STRING or obj_t == @TID_ATOM do
       return str_concat("chasm_str_char_at(ctx, ", str_concat(obj_c, str_concat(", ", str_concat(idx_c, ")"))))
@@ -660,39 +650,39 @@ defp emit_expr(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :struct_lit do
-    return emit_expr_struct_lit(pool, ch, types, structs, fns, fields, var_elems, ve_len, idx)
+    return emit_expr_struct_lit(cctx, var_elems, ve_len, idx)
   end
 
   if tag == :struct_update do
-    return emit_expr_struct_update(pool, ch, types, structs, fns, fields, var_elems, ve_len, idx)
+    return emit_expr_struct_update(cctx, var_elems, ve_len, idx)
   end
 
   if tag == :match_expr do
-    return emit_expr_match(pool, ch, types, structs, fns, fields, var_elems, ve_len, idx)
+    return emit_expr_match(cctx, var_elems, ve_len, idx)
   end
 
   if tag == :pipe_expr do
-    return emit_expr_pipe(pool, ch, types, structs, fns, fields, var_elems, ve_len, idx)
+    return emit_expr_pipe(cctx, var_elems, ve_len, idx)
   end
 
   if tag == :interp_expr do
-    return emit_expr_interp(pool, ch, types, structs, fns, fields, var_elems, ve_len, idx)
+    return emit_expr_interp(cctx, var_elems, ve_len, idx)
   end
 
   if tag == :range_expr do
-    lo_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
-    hi_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.b)
+    lo_c = emit_expr(cctx, var_elems, ve_len, node.a)
+    hi_c = emit_expr(cctx, var_elems, ve_len, node.b)
     return str_concat("chasm_range(ctx, ", str_concat(lo_c, str_concat(", ", str_concat(hi_c, ")"))))
   end
 
   if tag == :tuple_lit do
-    return emit_expr_tuple_lit(pool, ch, types, structs, fns, fields, var_elems, ve_len, idx)
+    return emit_expr_tuple_lit(cctx, var_elems, ve_len, idx)
   end
 
   # if/else used as an expression value — emit C ternary using the last expr
   # from each branch block.
   if tag == :if_stmt do
-    return emit_expr_if_value(pool, ch, types, structs, fns, fields, var_elems, ve_len, idx)
+    return emit_expr_if_value(cctx, var_elems, ve_len, idx)
   end
 
   return "0"

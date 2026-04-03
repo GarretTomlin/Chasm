@@ -140,3 +140,20 @@ end
 # Returns: 1=frame (local/computed), 2=script, 3=persistent
 # Heuristic: @attr references carry the attr's lifetime; everything else is frame.
 
+defstruct SCtx do
+  pool    :: []Node
+  ch      :: []int
+  types   :: []int
+  fns     :: []FnSig
+  structs :: []StructDef
+  fields  :: []FieldDef
+  src     :: string
+  file    :: string
+end
+
+defp make_sctx(pool :: []Node, ch :: []int, types :: []int,
+               fns :: []FnSig, structs :: []StructDef,
+               fields :: []FieldDef, src :: string, file :: string) :: SCtx do
+  return SCtx{ pool: pool, ch: ch, types: types, fns: fns, structs: structs, fields: fields, src: src, file: file }
+end
+

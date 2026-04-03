@@ -2,32 +2,31 @@
 # Returns updated sym_len (new vars declared in this stmt extend the scope).
 # dc is threaded through all calls; callers must use the returned dc.
 
-defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
+defp sema_stmt(sctx :: SCtx,
                syms :: []Sym, sym_len :: int,
-               fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
-               dc :: DiagCollector, src :: string, file :: string,
+               dc :: DiagCollector,
                cur_fn_ret :: int, cur_fn_name :: string,
                attrs :: []AttrInfo,
                idx :: int) :: int do
   if idx < 0 do return sym_len end
-  node = pool.get(idx)
+  node :: Node = sctx.pool.get(idx)
   tag  = node.tag
 
   # Explicit var decl: name :: type = expr
   if tag == :var_decl do
-    val_t  = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
+    val_t  = sema_expr(sctx, syms, sym_len, dc, node.b)
     elem_t = 0
     ann_t  = 0
     if node.c >= 0 do
-      tref  = pool.get(node.c)
-      ann_t = resolve_type(tref.name, structs)
+      tref :: Node = sctx.pool.get(node.c)
+      ann_t = resolve_type(tref.name, sctx.structs)
       if ann_t != 0 do
         # E002: type mismatch on declaration
         if val_t != 0 and val_t != ann_t do
-          snip  = extract_snippet(src, node.line)
+          snip  = extract_snippet(sctx.src, node.line)
           caret = make_caret(node.col, str_len(node.name))
           msg   = str_concat("expected `", str_concat(type_name(ann_t), str_concat("`, found `", str_concat(type_name(val_t), "`"))))
-          d :: Diagnostic = Diagnostic{ code: "E002", category: "type mismatch", file: file, line: node.line, col: node.col, message: msg, snippet: snip, caret: caret, help: "" }
+          d :: Diagnostic = Diagnostic{ code: "E002", category: "type mismatch", file: sctx.file, line: node.line, col: node.col, message: msg, snippet: snip, caret: caret, help: "" }
           dc = diag_emit(dc, d)
         end
         val_t = ann_t
@@ -35,22 +34,22 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
       if str_len(tref.name) >= 2 do
         if str_slice(tref.name, 0, 2) == "[]" do
           elem_name = str_slice(tref.name, 2, str_len(tref.name))
-          elem_t    = resolve_type(elem_name, structs)
+          elem_t    = resolve_type(elem_name, sctx.structs)
         end
       end
     end
     # Fallback: detect array_new(Type, cap) without type annotation
     if elem_t == 0 do
-      rhs_vd = pool.get(node.b)
+      rhs_vd :: Node = sctx.pool.get(node.b)
       if rhs_vd.tag == :call do
         if rhs_vd.name == "array_new" do
           if rhs_vd.b == 2 do
-            ta_idx_vd = ch.get(rhs_vd.a)
-            ta_nd_vd  = pool.get(ta_idx_vd)
+            ta_idx_vd = sctx.ch.get(rhs_vd.a)
+            ta_nd_vd :: Node = sctx.pool.get(ta_idx_vd)
             if ta_nd_vd.tag == :ident do
               si_vd = 0
-              while si_vd < structs.len do
-                sd_vd = structs.get(si_vd)
+              while si_vd < sctx.structs.len do
+                sd_vd :: StructDef = sctx.structs.get(si_vd)
                 if sd_vd.name == ta_nd_vd.name do elem_t = sd_vd.type_id end
                 si_vd = si_vd + 1
               end
@@ -59,11 +58,11 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
         end
       end
     end
-    types.set(idx, val_t)
+    sctx.types.set(idx, val_t)
     # Extract lifetime from explicit annotation (frame=1, script=2, persistent=3)
     decl_lt = 1
     if node.c >= 0 do
-      tref_lt = pool.get(node.c)
+      tref_lt :: Node = sctx.pool.get(node.c)
       if tref_lt.name == "frame"      do decl_lt = 1 end
       if tref_lt.name == "script"     do decl_lt = 2 end
       if tref_lt.name == "persistent" do decl_lt = 3 end
@@ -74,22 +73,22 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
 
   # Assignment: name = expr
   if tag == :assign do
-    val_t    = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
-    lhs_node = pool.get(node.a)
+    val_t    = sema_expr(sctx, syms, sym_len, dc, node.b)
+    lhs_node :: Node = sctx.pool.get(node.a)
     if lhs_node.tag == :ident do
       already = sym_contains(syms, sym_len, lhs_node.name)
       if already == false do
         elem_t_as = 0
-        rhs_as = pool.get(node.b)
+        rhs_as :: Node = sctx.pool.get(node.b)
         if rhs_as.tag == :call do
           if rhs_as.name == "array_new" do
             if rhs_as.b == 2 do
-              ta_idx_as = ch.get(rhs_as.a)
-              ta_nd_as  = pool.get(ta_idx_as)
+              ta_idx_as = sctx.ch.get(rhs_as.a)
+              ta_nd_as :: Node = sctx.pool.get(ta_idx_as)
               if ta_nd_as.tag == :ident do
                 si_as = 0
-                while si_as < structs.len do
-                  sd_as = structs.get(si_as)
+                while si_as < sctx.structs.len do
+                  sd_as :: StructDef = sctx.structs.get(si_as)
                   if sd_as.name == ta_nd_as.name do elem_t_as = sd_as.type_id end
                   si_as = si_as + 1
                 end
@@ -100,44 +99,44 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
         sym_len = sym_push(syms, sym_len, lhs_node.name, val_t, elem_t_as)
       end
     end
-    types.set(idx, val_t)
+    sctx.types.set(idx, val_t)
     return sym_len
   end
 
   if tag == :return_stmt do
-    ret_t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+    ret_t = sema_expr(sctx, syms, sym_len, dc, node.a)
     # E006: return type mismatch
     if cur_fn_ret != @TID_UNKNOWN and cur_fn_ret != @TID_VOID and ret_t != @TID_UNKNOWN and ret_t != cur_fn_ret do
-      snip  = extract_snippet(src, node.line)
+      snip  = extract_snippet(sctx.src, node.line)
       caret = make_caret(node.col, 6)
       msg   = str_concat("expected `", str_concat(type_name(cur_fn_ret), str_concat("`, found `", str_concat(type_name(ret_t), "`"))))
       help  = str_concat("`", str_concat(cur_fn_name, str_concat("` is declared to return `", str_concat(type_name(cur_fn_ret), "`"))))
-      d :: Diagnostic = Diagnostic{ code: "E006", category: "return type mismatch", file: file, line: node.line, col: node.col, message: msg, snippet: snip, caret: caret, help: help }
+      d :: Diagnostic = Diagnostic{ code: "E006", category: "return type mismatch", file: sctx.file, line: node.line, col: node.col, message: msg, snippet: snip, caret: caret, help: help }
       dc = diag_emit(dc, d)
     end
     return sym_len
   end
 
   if tag == :if_stmt do
-    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
-    sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, cur_fn_ret, cur_fn_name, attrs, node.b)
+    _t = sema_expr(sctx, syms, sym_len, dc, node.a)
+    sema_block(sctx, syms, sym_len, dc, cur_fn_ret, cur_fn_name, attrs, node.b)
     if node.c >= 0 do
-      sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, cur_fn_ret, cur_fn_name, attrs, node.c)
+      sema_block(sctx, syms, sym_len, dc, cur_fn_ret, cur_fn_name, attrs, node.c)
     end
     return sym_len
   end
 
   if tag == :while_stmt do
-    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
-    sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, cur_fn_ret, cur_fn_name, attrs, node.b)
+    _t = sema_expr(sctx, syms, sym_len, dc, node.a)
+    sema_block(sctx, syms, sym_len, dc, cur_fn_ret, cur_fn_name, attrs, node.b)
     return sym_len
   end
 
   if tag == :for_stmt do
     pre_mark = sym_len
-    iter_t   = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+    iter_t   = sema_expr(sctx, syms, sym_len, dc, node.a)
     # Infer loop variable type from the iterator's element type
-    iter_node = pool.get(node.a)
+    iter_node :: Node = sctx.pool.get(node.a)
     loop_var_t = @TID_INT  # default: int (range iteration)
     loop_var_et = 0
     if iter_node.tag == :ident do
@@ -152,7 +151,7 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
       if loop_var_et > 0 do loop_var_t = loop_var_et end
     end
     sym_len  = sym_push(syms, sym_len, node.name, loop_var_t, 0)
-    sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, cur_fn_ret, cur_fn_name, attrs, node.b)
+    sema_block(sctx, syms, sym_len, dc, cur_fn_ret, cur_fn_name, attrs, node.b)
     return pre_mark
   end
 
@@ -161,22 +160,22 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :at_assign do
-    rhs_t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.b)
+    rhs_t = sema_expr(sctx, syms, sym_len, dc, node.b)
     # E008: lifetime violation — check if rhs lifetime < attr lifetime
     ai = attr_info_lookup(attrs, node.name)
     if ai >= 0 do
       attr_info  = attrs.get(ai)
       attr_lt    = attr_info.lifetime
-      rhs_lt     = expr_lifetime(pool, ch, attrs, node.b)
+      rhs_lt     = expr_lifetime(sctx.pool, sctx.ch, attrs, node.b)
       # If rhs is a locally-declared variable with an explicit lifetime annotation,
       # use that declared lifetime (e.g. `x :: persistent = persist_copy(...)`)
-      rhs_node_e8 = pool.get(node.b)
+      rhs_node_e8 :: Node = sctx.pool.get(node.b)
       if rhs_node_e8.tag == :ident do
         sym_lt_e8 = sym_lifetime_lookup(syms, sym_len, rhs_node_e8.name)
         if sym_lt_e8 > rhs_lt do rhs_lt = sym_lt_e8 end
       end
       if attr_lt > 1 and rhs_lt < attr_lt do
-        snip  = extract_snippet(src, node.line)
+        snip  = extract_snippet(sctx.src, node.line)
         caret = make_caret(node.col, str_len(node.name))
         lt_names :: []string = []
         lt_names.push("unknown")
@@ -189,7 +188,7 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
         help = ""
         if attr_lt == 2 do help = "use `copy_to_script()` to promote this value" end
         if attr_lt == 3 do help = "use `persist_copy()` to promote this value" end
-        d :: Diagnostic = Diagnostic{ code: "E008", category: "lifetime violation", file: file, line: node.line, col: node.col, message: msg, snippet: snip, caret: caret, help: help }
+        d :: Diagnostic = Diagnostic{ code: "E008", category: "lifetime violation", file: sctx.file, line: node.line, col: node.col, message: msg, snippet: snip, caret: caret, help: help }
         dc = diag_emit(dc, d)
       end
     end
@@ -197,7 +196,7 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :tuple_dest do
-    _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, node.a)
+    _t = sema_expr(sctx, syms, sym_len, dc, node.a)
     names = node.name
     ni    = 0
     start = 0
@@ -221,69 +220,67 @@ defp sema_stmt(pool :: []Node, ch :: []int, types :: []int,
       end
       ni = ni + 1
     end
-    types.set(idx, 0)
+    sctx.types.set(idx, 0)
     return sym_len
   end
 
   # Expression statement
-  _t = sema_expr(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, idx)
+  _t = sema_expr(sctx, syms, sym_len, dc, idx)
   return sym_len
 end
 
 # ---- Pass 2: walk a block ----------------------------------------------------
 
-defp sema_block(pool :: []Node, ch :: []int, types :: []int,
+defp sema_block(sctx :: SCtx,
                 syms :: []Sym, sym_len :: int,
-                fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
-                dc :: DiagCollector, src :: string, file :: string,
+                dc :: DiagCollector,
                 cur_fn_ret :: int, cur_fn_name :: string,
                 attrs :: []AttrInfo,
                 block_idx :: int) do
   if block_idx < 0 do return end
-  node = pool.get(block_idx)
+  node :: Node = sctx.pool.get(block_idx)
   cs   = node.a
   cl   = node.b
   i    = 0
   while i < cl do
-    child   = ch.get(cs + i)
-    sym_len = sema_stmt(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, cur_fn_ret, cur_fn_name, attrs, child)
+    child   = sctx.ch.get(cs + i)
+    sym_len = sema_stmt(sctx, syms, sym_len, dc, cur_fn_ret, cur_fn_name, attrs, child)
     i = i + 1
   end
 end
 
 # ---- Pass 2: walk a function declaration ------------------------------------
 
-defp sema_fn(pool :: []Node, ch :: []int, types :: []int,
+defp sema_fn(sctx :: SCtx,
              syms :: []Sym,
-             fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
-             dc :: DiagCollector, src :: string, file :: string,
+             dc :: DiagCollector,
              fn_idx :: int, attr_sym_len :: int, attrs :: []AttrInfo) do
-  fn_node      = pool.get(fn_idx)
+  fn_node :: Node = sctx.pool.get(fn_idx)
   params_start = fn_node.a
   params_count = fn_node.b
   body         = fn_node.c
   # Determine return type and name for E006 checking
   fn_name_full = fn_node.name
   fn_name      = fn_split_name(fn_name_full)
-  fn_ret       = fn_split_ret(fn_name_full, structs)
+  fn_ret       = fn_split_ret(fn_name_full, sctx.structs)
   sym_len = attr_sym_len
   i       = 0
   while i < params_count do
-    param_idx  = ch.get(params_start + i)
-    param_node = pool.get(param_idx)
-    type_ref   = pool.get(param_node.a)
-    param_tid  = resolve_type(type_ref.name, structs)
+    param_idx  = sctx.ch.get(params_start + i)
+    param_node :: Node = sctx.pool.get(param_idx)
+    type_ref :: Node = sctx.pool.get(param_node.a)
+    param_tid  = resolve_type(type_ref.name, sctx.structs)
     param_et   = 0
     if str_len(type_ref.name) >= 2 do
       if str_slice(type_ref.name, 0, 2) == "[]" do
         elem_name = str_slice(type_ref.name, 2, str_len(type_ref.name))
-        param_et  = resolve_type(elem_name, structs)
+        param_et  = resolve_type(elem_name, sctx.structs)
       end
     end
     sym_len    = sym_push(syms, sym_len, param_node.name, param_tid, param_et)
     i = i + 1
   end
-  sema_block(pool, ch, types, syms, sym_len, fns, structs, fields, dc, src, file, fn_ret, fn_name, attrs, body)
+  sema_block(sctx, syms, sym_len, dc, fn_ret, fn_name, attrs, body)
 end
 
 # ---- Main sema entry point ---------------------------------------------------
@@ -292,7 +289,8 @@ defp sema_all(pool :: []Node, ch :: []int, root :: int,
               types :: []int, syms :: []Sym,
               fns :: []FnSig, structs :: []StructDef, fields :: []FieldDef,
               src :: string, file :: string, dc :: DiagCollector) :: DiagCollector do
-  root_node = pool.get(root)
+  sctx :: SCtx = make_sctx(pool, ch, types, fns, structs, fields, src, file)
+  root_node :: Node = sctx.pool.get(root)
   cs = root_node.a
   cl = root_node.b
   # Pass 0: pre-populate @attr types into syms and build AttrInfo list.
@@ -300,30 +298,30 @@ defp sema_all(pool :: []Node, ch :: []int, root :: int,
   attr_sym_len = 0
   i = 0
   while i < cl do
-    decl_idx = ch.get(cs + i)
-    decl     = pool.get(decl_idx)
+    decl_idx = sctx.ch.get(cs + i)
+    decl :: Node = sctx.pool.get(decl_idx)
     if decl.tag == :at_decl do
       init_idx = decl.a
-      init_t   = sema_expr(pool, ch, types, syms, attr_sym_len, fns, structs, fields, dc, src, file, init_idx)
+      init_t   = sema_expr(sctx, syms, attr_sym_len, dc, init_idx)
       # Extract array element type for array_fixed(@attr) — needed for typed .get()/.set()
       elem_t = 0
       if init_t == @TID_ARRAY do
-        init_nd = pool.get(init_idx)
+        init_nd :: Node = sctx.pool.get(init_idx)
         if init_nd.tag == :call do
           if init_nd.name == "array_fixed" do
             if init_nd.b >= 2 do
-              def_child_idx = ch.get(init_nd.a + 1)
-              elem_t = types.get(def_child_idx)
+              def_child_idx = sctx.ch.get(init_nd.a + 1)
+              elem_t = sctx.types.get(def_child_idx)
             end
           end
           if init_nd.name == "array_new" do
             if init_nd.b == 2 do
-              ta_idx_at = ch.get(init_nd.a)
-              ta_nd_at  = pool.get(ta_idx_at)
+              ta_idx_at = sctx.ch.get(init_nd.a)
+              ta_nd_at :: Node = sctx.pool.get(ta_idx_at)
               if ta_nd_at.tag == :ident do
                 si_at = 0
-                while si_at < structs.len do
-                  sd_at = structs.get(si_at)
+                while si_at < sctx.structs.len do
+                  sd_at :: StructDef = sctx.structs.get(si_at)
                   if sd_at.name == ta_nd_at.name do elem_t = sd_at.type_id end
                   si_at = si_at + 1
                 end
@@ -341,10 +339,10 @@ defp sema_all(pool :: []Node, ch :: []int, root :: int,
   # Pass 1: type-check all functions, starting with the pre-populated attrs in syms.
   i = 0
   while i < cl do
-    decl_idx = ch.get(cs + i)
-    decl     = pool.get(decl_idx)
+    decl_idx = sctx.ch.get(cs + i)
+    decl :: Node = sctx.pool.get(decl_idx)
     if decl.tag == :fn_decl do
-      sema_fn(pool, ch, types, syms, fns, structs, fields, dc, src, file, decl_idx, attr_sym_len, attrs)
+      sema_fn(sctx, syms, dc, decl_idx, attr_sym_len, attrs)
     end
     i = i + 1
   end
@@ -353,8 +351,8 @@ defp sema_all(pool :: []Node, ch :: []int, root :: int,
   has_toplevel_stmts = false
   i = 0
   while i < cl do
-    decl_idx = ch.get(cs + i)
-    decl     = pool.get(decl_idx)
+    decl_idx = sctx.ch.get(cs + i)
+    decl :: Node = sctx.pool.get(decl_idx)
     if decl.tag == :toplevel_stmt do
       has_toplevel_stmts = true
       i = cl
@@ -365,10 +363,10 @@ defp sema_all(pool :: []Node, ch :: []int, root :: int,
     tl_sym_len = attr_sym_len
     i = 0
     while i < cl do
-      decl_idx = ch.get(cs + i)
-      decl     = pool.get(decl_idx)
+      decl_idx = sctx.ch.get(cs + i)
+      decl :: Node = sctx.pool.get(decl_idx)
       if decl.tag == :toplevel_stmt do
-        tl_sym_len = sema_stmt(pool, ch, types, syms, tl_sym_len, fns, structs, fields, dc, src, file, 0, "main", attrs, decl.a)
+        tl_sym_len = sema_stmt(sctx, syms, tl_sym_len, dc, 0, "main", attrs, decl.a)
       end
       i = i + 1
     end

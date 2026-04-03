@@ -14,20 +14,19 @@ end
 
 # ---- Emit block body (forward reference: emit_stmt defined below) -----------
 
-defp emit_block_body(pool :: []Node, ch :: []int, types :: []int,
-                     structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_block_body(cctx :: CCtx,
                      var_elems :: []VarElem, ve_len :: int,
                      depth :: int, block_idx :: int) :: int do
   if block_idx < 0 do return ve_len end
-  node = pool.get(block_idx)
+  node :: Node = cctx.pool.get(block_idx)
   cs   = node.a
   cl   = node.b
   i    = 0
   while i < cl do
-    child  = ch.get(cs + i)
-    cn     = pool.get(child)
+    child  = cctx.ch.get(cs + i)
+    cn :: Node = cctx.pool.get(child)
     if is_stmt_tag(cn.tag) do
-      ve_len = emit_stmt(pool, ch, types, structs, fns, fields, var_elems, ve_len, depth, child)
+      ve_len = emit_stmt(cctx, var_elems, ve_len, depth, child)
     end
     i = i + 1
   end
@@ -36,26 +35,25 @@ end
 
 # ---- Emit statement (returns updated ve_len) ---------------------------------
 
-defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
-               structs :: []StructDef, fns :: []FnSig, fields :: []FieldDef,
+defp emit_stmt(cctx :: CCtx,
                var_elems :: []VarElem, ve_len :: int,
                depth :: int, idx :: int) :: int do
   if idx < 0 do return ve_len end
-  node = pool.get(idx)
+  node :: Node = cctx.pool.get(idx)
   tag  = node.tag
   ind  = indent_str(depth)
 
   if tag == :var_decl do
-    val_c  = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.b)
-    val_t  = types.get(idx)
-    type_c = c_type(val_t, structs)
+    val_c  = emit_expr(cctx, var_elems, ve_len, node.b)
+    val_t  = cctx.types.get(idx)
+    type_c = c_type(val_t, cctx.structs)
     # Track array element type from annotation; register name as declared either way.
     if node.c >= 0 do
-      tref  = pool.get(node.c)
+      tref :: Node = cctx.pool.get(node.c)
       ann_n = tref.name
       if str_len(ann_n) >= 2 do
         if str_slice(ann_n, 0, 2) == "[]" do
-          et     = elem_type_of_ann(ann_n, structs)
+          et     = elem_type_of_ann(ann_n, cctx.structs)
           ve_len = ve_push(var_elems, ve_len, node.name, et)
           # Patch string/atom array initializer to use _s variant
           if et == @TID_STRING or et == @TID_ATOM do
@@ -68,17 +66,17 @@ defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
     end
     # Fallback: detect array_new(Type, cap) on RHS without annotation
     if ve_declared(var_elems, ve_len, node.name) == false do
-      rhs_node = pool.get(node.b)
+      rhs_node :: Node = cctx.pool.get(node.b)
       if rhs_node.tag == :call do
         if rhs_node.name == "array_new" do
           if rhs_node.b == 2 do
-            type_arg_idx = ch.get(rhs_node.a)
-            type_node    = pool.get(type_arg_idx)
+            type_arg_idx = cctx.ch.get(rhs_node.a)
+            type_node :: Node = cctx.pool.get(type_arg_idx)
             if type_node.tag == :ident do
               si     = 0
               et_tid = 0
-              while si < structs.len do
-                sd = structs.get(si)
+              while si < cctx.structs.len do
+                sd :: StructDef = cctx.structs.get(si)
                 if sd.name == type_node.name do et_tid = sd.type_id end
                 si = si + 1
               end
@@ -98,8 +96,8 @@ defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
   end
 
   if tag == :assign do
-    lhs_node = pool.get(node.a)
-    val_c    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.b)
+    lhs_node :: Node = cctx.pool.get(node.a)
+    val_c    = emit_expr(cctx, var_elems, ve_len, node.b)
     if lhs_node.tag == :ident do
       nm = lhs_node.name
       if ve_declared(var_elems, ve_len, nm) do
@@ -107,23 +105,23 @@ defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
         print(str_concat(ind, str_concat(nm, str_concat(" = ", str_concat(val_c, ";")))))
       else
         # First use: emit a typed declaration and register the name.
-        # types[idx] holds the assign-node type (set by sema); types[node.a] (ident) is 0.
-        val_t  = types.get(idx)
-        type_c = c_type(val_t, structs)
+        # cctx.types[idx] holds the assign-node type (set by sema); cctx.types[node.a] (ident) is 0.
+        val_t  = cctx.types.get(idx)
+        type_c = c_type(val_t, cctx.structs)
         # Detect RHS patterns that tell us more about the variable type.
         # (1) array_new(Type, cap) — register elem type for the new array.
         # (2) array.get(i) / array_fixed_init_T — infer struct type from receiver's VarElem.
         et_assign = 0
-        rhs_nd = pool.get(node.b)
+        rhs_nd :: Node = cctx.pool.get(node.b)
         if rhs_nd.tag == :call do
           if rhs_nd.name == "array_new" do
             if rhs_nd.b == 2 do
-              ta_idx = ch.get(rhs_nd.a)
-              ta_nd  = pool.get(ta_idx)
+              ta_idx = cctx.ch.get(rhs_nd.a)
+              ta_nd :: Node = cctx.pool.get(ta_idx)
               if ta_nd.tag == :ident do
                 si2 = 0
-                while si2 < structs.len do
-                  sd2 = structs.get(si2)
+                while si2 < cctx.structs.len do
+                  sd2 :: StructDef = cctx.structs.get(si2)
                   if sd2.name == ta_nd.name do et_assign = sd2.type_id end
                   si2 = si2 + 1
                 end
@@ -134,7 +132,7 @@ defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
         # (2) rhs is .get(i) on a typed array — use the array's elem type as var type
         if rhs_nd.tag == :method_call do
           if rhs_nd.name == "get" do
-            recv_nd = pool.get(rhs_nd.a)
+            recv_nd :: Node = cctx.pool.get(rhs_nd.a)
             recv_nm = ""
             if recv_nd.tag == :ident do recv_nm = recv_nd.name end
             if recv_nd.tag == :at_ref do recv_nm = str_slice(recv_nd.name, 1, str_len(recv_nd.name)) end
@@ -142,7 +140,7 @@ defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
               recv_tid = ve_lookup(var_elems, ve_len, recv_nm)
               if recv_tid > 9 do
                 val_t  = recv_tid
-                type_c = c_type(recv_tid, structs)
+                type_c = c_type(recv_tid, cctx.structs)
               end
             end
           end
@@ -158,36 +156,36 @@ defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
     if node.a < 0 do
       print(str_concat(ind, "return;"))
     else
-      val_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
+      val_c = emit_expr(cctx, var_elems, ve_len, node.a)
       print(str_concat(ind, str_concat("return ", str_concat(val_c, ";"))))
     end
     return ve_len
   end
 
   if tag == :if_stmt do
-    cond_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
+    cond_c = emit_expr(cctx, var_elems, ve_len, node.a)
     print(str_concat(ind, str_concat("if (", str_concat(unwrap_cond(cond_c), ") {"))))
-    _ve = emit_block_body(pool, ch, types, structs, fns, fields, var_elems, ve_len, depth + 1, node.b)
+    _ve = emit_block_body(cctx, var_elems, ve_len, depth + 1, node.b)
     if node.c >= 0 do
       print(str_concat(ind, "} else {"))
-      _ve = emit_block_body(pool, ch, types, structs, fns, fields, var_elems, ve_len, depth + 1, node.c)
+      _ve = emit_block_body(cctx, var_elems, ve_len, depth + 1, node.c)
     end
     print(str_concat(ind, "}"))
     return ve_len
   end
 
   if tag == :while_stmt do
-    cond_c = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
+    cond_c = emit_expr(cctx, var_elems, ve_len, node.a)
     print(str_concat(ind, str_concat("while (", str_concat(unwrap_cond(cond_c), ") {"))))
-    _ve = emit_block_body(pool, ch, types, structs, fns, fields, var_elems, ve_len, depth + 1, node.b)
+    _ve = emit_block_body(cctx, var_elems, ve_len, depth + 1, node.b)
     print(str_concat(ind, "}"))
     return ve_len
   end
 
   if tag == :for_stmt do
-    iter_c    = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
+    iter_c    = emit_expr(cctx, var_elems, ve_len, node.a)
     var_n     = node.name
-    iter_node = pool.get(node.a)
+    iter_node :: Node = cctx.pool.get(node.a)
     elem_tid  = 0
     if iter_node.tag == :ident do
       elem_tid = ve_lookup(var_elems, ve_len, iter_node.name)
@@ -196,8 +194,8 @@ defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
       at_bare = str_slice(iter_node.name, 1, str_len(iter_node.name))
       elem_tid = ve_lookup(var_elems, ve_len, at_bare)
     end
-    elem_c   = c_type(elem_tid, structs)
-    esuf     = array_elem_suffix(structs, elem_tid)
+    elem_c   = c_type(elem_tid, cctx.structs)
+    esuf     = array_elem_suffix(cctx.structs, elem_tid)
     print(str_concat(ind, "{"))
     ind1 = str_concat(ind, "  ")
     # Store iter in a temp to avoid double-evaluation (e.g. range rvalue)
@@ -206,7 +204,7 @@ defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
     print(str_concat(ind1, "for (int64_t _fi = 0; _fi < _iter.len; _fi++) {"))
     ind2 = str_concat(ind1, "  ")
     print(str_concat(ind2, str_concat(elem_c, str_concat(" ", str_concat(var_n, str_concat(" = chasm_array_get", str_concat(esuf, "(ctx, &_iter, _fi);")))))))
-    _ve = emit_block_body(pool, ch, types, structs, fns, fields, var_elems, ve_len, depth + 2, node.b)
+    _ve = emit_block_body(cctx, var_elems, ve_len, depth + 2, node.b)
     print(str_concat(ind1, "}"))
     print(str_concat(ind, "}"))
     return ve_len
@@ -220,8 +218,8 @@ defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
     # If the attr has script/persistent lifetime and the RHS is a string,
     # wrap with the appropriate promotion call so the string survives frame resets.
     attr_name = str_slice(node.name, 1, str_len(node.name))
-    val_c     = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.b)
-    rhs_t     = types.get(node.b)
+    val_c     = emit_expr(cctx, var_elems, ve_len, node.b)
+    rhs_t     = cctx.types.get(node.b)
     lt        = ve_lookup(var_elems, ve_len, str_concat("__lt_", attr_name))
     if rhs_t == @TID_STRING do
       if lt == 2 do
@@ -237,7 +235,7 @@ defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
 
   if tag == :tuple_dest do
     # a, b = expr  →  ChasmTuple2 _t = expr; int64_t a = _t.v0; int64_t b = _t.v1;
-    rhs_c  = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, node.a)
+    rhs_c  = emit_expr(cctx, var_elems, ve_len, node.a)
     names  = node.name
     # Count commas to determine tuple size
     tcount = 1
@@ -279,7 +277,7 @@ defp emit_stmt(pool :: []Node, ch :: []int, types :: []int,
   end
 
   # Expression statement
-  ec = emit_expr(pool, ch, types, structs, fns, fields, var_elems, ve_len, idx)
+  ec = emit_expr(cctx, var_elems, ve_len, idx)
   print(str_concat(ind, str_concat(ec, ";")))
   return ve_len
 end

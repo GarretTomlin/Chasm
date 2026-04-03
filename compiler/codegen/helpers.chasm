@@ -4,6 +4,21 @@
 # Uses a VarElem side-table to track array element types per variable.
 
 
+defstruct CCtx do
+  pool    :: []Node
+  ch      :: []int
+  types   :: []int
+  structs :: []StructDef
+  fns     :: []FnSig
+  fields  :: []FieldDef
+end
+
+defp make_cctx(pool :: []Node, ch :: []int, types :: []int,
+               structs :: []StructDef, fns :: []FnSig,
+               fields :: []FieldDef) :: CCtx do
+  return CCtx{ pool: pool, ch: ch, types: types, structs: structs, fns: fns, fields: fields }
+end
+
 # ---- VarElem: per-variable array element type --------------------------------
 
 defstruct VarElem do
