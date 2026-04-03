@@ -167,3 +167,21 @@ defp render_all_diags(dc :: DiagCollector) do
   end
 end
 
+defp sync_to(tokens :: []Token, pos :: int, until_end :: bool, until_expr :: bool) :: int do
+  while tok_kind(tokens, pos) != :eof do
+    k = tok_kind(tokens, pos)
+    if k == :def_kw or k == :defp_kw or k == :defstruct_kw or k == :enum_kw or k == :extern_kw do
+      return pos
+    end
+    if until_end do
+      if k == :end_kw or k == :else_kw or k == :newline do return pos end
+    end
+    if until_expr do
+      if k == :rparen or k == :rbracket or k == :newline or k == :end_kw or k == :else_kw do
+        return pos
+      end
+    end
+    pos = pos + 1
+  end
+  return pos
+end
