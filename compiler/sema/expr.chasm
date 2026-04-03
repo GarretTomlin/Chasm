@@ -324,6 +324,10 @@ defp sema_expr(sctx :: SCtx,
       if recv_node.tag == :at_ref do
         elem_t = sym_elem_lookup(syms, sym_len, recv_node.name)
       end
+      if recv_node.tag == :field_get do
+        obj_t = sctx.types.get(recv_node.a)
+        elem_t = field_elem_lookup(sctx.fields, obj_t, recv_node.name)
+      end
       sctx.types.set(idx, elem_t)
       return elem_t
     end
