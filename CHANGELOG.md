@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.9.7] — 2026-04-03 — Parser error recovery
+
+### Summary
+
+The Chasm parser now emits structured diagnostics for syntax errors and continues parsing after each one, so a single compile run reports all errors instead of stopping at the first misparse.
+
+### Changes
+
+- **feat(parser)**: panic-mode error recovery with synchronization sets — after each syntax error the parser skips to a safe token (`def`/`end`/`newline`/etc.) and resumes parsing
+- **feat(parser)**: `E100` — unexpected token at top level (stray `end`, `else`, or `do` where a definition is expected)
+- **feat(parser)**: `E101` — missing `do` keyword after `while`/`if`/`defstruct`/function signature
+- **feat(parser)**: `E102` — missing `end` keyword closing a `while`/`if`/`defstruct`/function body
+- **feat(parser)**: `E103` — unrecognized token in expression position
+- **refactor(parser)**: `Diagnostic`/`DiagCollector` types moved from `sema/diag.chasm` to `parser/helpers.chasm` so parse errors and sema errors share one collector
+- **chore**: `dc :: DiagCollector` threaded through all parse functions in `exprs.chasm` and `stmts.chasm`; `main.chasm` creates one `dc` before `parse_file` and passes it to both parse and sema passes
+- **chore**: CLI version bumped to `1.9.7`
+
+---
+
 ## [1.9.6] — 2026-03-30 — Compiler refactor
 
 ### Summary
