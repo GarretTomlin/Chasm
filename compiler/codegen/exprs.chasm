@@ -131,6 +131,10 @@ defp emit_expr_method_call(pool :: []Node, ch :: []int, types :: []int,
     at_bare = str_slice(recv_node.name, 1, str_len(recv_node.name))
     elem_tid = ve_lookup(var_elems, ve_len, at_bare)
   end
+  if recv_node.tag == :field_get do
+    obj_t    = types.get(recv_node.a)
+    elem_tid = field_elem_lookup(fields, obj_t, recv_node.name)
+  end
   esuf = array_elem_suffix(structs, elem_tid)
   if mn == "push" do
     arg_idx = ch.get(cs)

@@ -124,6 +124,7 @@ defstruct FieldDef do
   struct_tid       :: int
   name             :: string
   type_id          :: int
+  elem_type        :: int
   default_node_idx :: int
 end
 
@@ -137,6 +138,18 @@ defp field_lookup(fields :: []FieldDef, struct_tid :: int, name :: string) :: in
     i = i + 1
   end
   return @TID_UNKNOWN
+end
+
+defp field_elem_lookup(fields :: []FieldDef, struct_tid :: int, name :: string) :: int do
+  i = 0
+  while i < fields.len do
+    f = fields.get(i)
+    if f.struct_tid == struct_tid and f.name == name do
+      return f.elem_type
+    end
+    i = i + 1
+  end
+  return 0
 end
 
 # ---- Type resolution from name string ----------------------------------------
@@ -355,7 +368,14 @@ defp collect_field_list(pool :: []Node, ch :: []int, structs :: []StructDef) :: 
       field_node = pool.get(field_idx)
       type_ref   = pool.get(field_node.a)
       field_tid  = resolve_type(type_ref.name, structs)
-      fd :: FieldDef = FieldDef{ struct_tid: sd.type_id, name: field_node.name, type_id: field_tid, default_node_idx: field_node.b }
+      field_elem = 0
+      if field_tid == @TID_ARRAY do
+        if str_len(type_ref.name) >= 2 do
+          elem_name  = str_slice(type_ref.name, 2, str_len(type_ref.name))
+          field_elem = resolve_type(elem_name, structs)
+        end
+      end
+      fd :: FieldDef = FieldDef{ struct_tid: sd.type_id, name: field_node.name, type_id: field_tid, elem_type: field_elem, default_node_idx: field_node.b }
       result.push(fd)
       fi = fi + 1
     end
