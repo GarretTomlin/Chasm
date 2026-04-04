@@ -1,0 +1,213 @@
+defp args_str(prog :: IRProg, ai :: int, ac :: int) :: string do
+  s = ""
+  i = 0
+  while i < ac do
+    v :: IRVal = prog.args.get(ai + i)
+    if i > 0 do s = str_concat(s, ", ") end
+    s = str_concat(s, v.tmp)
+    i = i + 1
+  end
+  return s
+end
+
+defp ir_emit_fn(cctx :: CCtx, prog :: IRProg, fn_def :: IRFn) do
+  depth = 1
+  i = fn_def.ops_start
+  end_i = fn_def.ops_start + fn_def.ops_len
+  while i < end_i do
+    op :: IROp = prog.ops.get(i)
+    ind = indent_str(depth)
+    k   = op.op
+
+    if k == :lit_int or k == :lit_float or k == :lit_bool do
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(c_type(op.dst.tid, prog.structs), str_concat(" ", str_concat(op.dst.tmp, str_concat(" = ", str_concat(op.name, ";")))))))
+    end
+
+    if k == :lit_str or k == :lit_atom do
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("const char* ", str_concat(op.dst.tmp, str_concat(" = ", str_concat(op.name, ";"))))))
+    end
+
+    if k == :lit_arr do
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("ChasmArray ", str_concat(op.dst.tmp, str_concat(" = chasm_array_new(ctx, ", str_concat(op.name, ");"))))))
+    end
+
+    if k == :binop do
+      la_s = op.a.tmp
+      rb_s = op.b.tmp
+      op_s = op.name
+      lt   = op.a.tid
+      cop  = op_s
+      if op_s == "and" do cop = "&&" end
+      if op_s == "or"  do cop = "||" end
+      rhs_s = str_concat("(", str_concat(la_s, str_concat(" ", str_concat(cop, str_concat(" ", str_concat(rb_s, ")"))))))
+      if op_s == "==" or op_s == "!=" do
+        if lt == @TID_STRING or lt == @TID_ATOM do
+          cmp_op2 = "=="
+          if op_s == "!=" do cmp_op2 = "!=" end
+          rhs_s = str_concat("(strcmp(", str_concat(la_s, str_concat(", ", str_concat(rb_s, str_concat(") ", str_concat(cmp_op2, " 0)"))))))
+        end
+      end
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(c_type(op.dst.tid, prog.structs), str_concat(" ", str_concat(op.dst.tmp, str_concat(" = ", str_concat(rhs_s, ";")))))))
+    end
+
+    if k == :unop do
+      prefix = "-"
+      if op.name == "not" do prefix = "!" end
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(c_type(op.dst.tid, prog.structs), str_concat(" ", str_concat(op.dst.tmp, str_concat(" = ", str_concat(prefix, str_concat("(", str_concat(op.a.tmp, ");")))))))))
+    end
+
+    if k == :at_read do
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(c_type(op.dst.tid, prog.structs), str_concat(" ", str_concat(op.dst.tmp, str_concat(" = g_", str_concat(op.name, ";")))))))
+    end
+
+    if k == :at_write do
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("g_", str_concat(op.name, str_concat(" = ", str_concat(op.a.tmp, ";"))))))
+    end
+
+    if k == :field_get do
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(c_type(op.dst.tid, prog.structs), str_concat(" ", str_concat(op.dst.tmp, str_concat(" = ", str_concat(op.a.tmp, str_concat(".", str_concat(op.name, ";")))))))))
+    end
+
+    if k == :index_get do
+      et_suf = array_elem_suffix(prog.structs, op.a.elem_tid)
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(c_type(op.dst.tid, prog.structs), str_concat(" ", str_concat(op.dst.tmp, str_concat(" = chasm_array_get", str_concat(et_suf, str_concat("(ctx, &", str_concat(op.a.tmp, str_concat(", ", str_concat(op.b.tmp, ");")))))))))))
+    end
+
+    if k == :call do
+      a_str = args_str(prog, op.ai, op.ac)
+      sep_str = ""
+      if op.ac > 0 do sep_str = ", " end
+      if str_len(op.dst.tmp) > 0 do
+        sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(c_type(op.dst.tid, prog.structs), str_concat(" ", str_concat(op.dst.tmp, str_concat(" = chasm_", str_concat(op.name, str_concat("(ctx", str_concat(sep_str, str_concat(a_str, ");"))))))))))
+      else
+        sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("chasm_", str_concat(op.name, str_concat("(ctx", str_concat(sep_str, str_concat(a_str, ")")))))))
+      end
+    end
+
+    if k == :method_call do
+      recv_s = op.a.tmp
+      rest_a = args_str(prog, op.ai + 1, op.ac - 1)
+      sep_rest = ""
+      if op.ac > 1 do sep_rest = str_concat(", ", rest_a) end
+      if str_len(op.dst.tmp) > 0 do
+        sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(c_type(op.dst.tid, prog.structs), str_concat(" ", str_concat(op.dst.tmp, str_concat(" = chasm_", str_concat(op.name, str_concat("(ctx, ", str_concat(recv_s, str_concat(sep_rest, ");"))))))))))
+      else
+        sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("chasm_", str_concat(op.name, str_concat("(ctx, ", str_concat(recv_s, str_concat(sep_rest, ")")))))))
+      end
+    end
+
+    if k == :var_decl do
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(c_type(op.dst.tid, prog.structs), str_concat(" ", str_concat(op.dst.tmp, str_concat(" = ", str_concat(op.a.tmp, ";")))))))
+    end
+
+    if k == :assign do
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(op.dst.tmp, str_concat(" = ", str_concat(op.a.tmp, ";")))))
+    end
+
+    if k == :return do
+      if str_len(op.a.tmp) > 0 do
+        sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("return ", str_concat(op.a.tmp, ";"))))
+      else
+        sec_emit(cctx, @SEC_BODY, str_concat(ind, "return;"))
+      end
+    end
+
+    if k == :break    do sec_emit(cctx, @SEC_BODY, str_concat(ind, "break;"))    end
+    if k == :continue do sec_emit(cctx, @SEC_BODY, str_concat(ind, "continue;")) end
+
+    if k == :if_begin do
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("if (", str_concat(unwrap_cond(op.a.tmp), ") {"))))
+      depth = depth + 1
+    end
+    if k == :if_else do
+      depth = depth - 1
+      ind2 = indent_str(depth)
+      sec_emit(cctx, @SEC_BODY, str_concat(ind2, "} else {"))
+      depth = depth + 1
+    end
+    if k == :if_end do
+      depth = depth - 1
+      ind1 = indent_str(depth)
+      sec_emit(cctx, @SEC_BODY, str_concat(ind1, "}"))
+    end
+
+    if k == :while_cond do
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("while (", str_concat(unwrap_cond(op.a.tmp), ") {"))))
+      depth = depth + 1
+    end
+    if k == :while_end do
+      depth = depth - 1
+      ind1 = indent_str(depth)
+      sec_emit(cctx, @SEC_BODY, str_concat(ind1, "}"))
+    end
+
+    if k == :for_begin do
+      iter_s  = op.a.tmp
+      var_n15 = op.name
+      et_suf2 = array_elem_suffix(prog.structs, op.a.elem_tid)
+      elem_c2 = c_type(op.a.elem_tid, prog.structs)
+      if op.a.elem_tid == 0 do elem_c2 = "int64_t" end
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, "{"))
+      depth = depth + 1
+      ind1 = indent_str(depth)
+      sec_emit(cctx, @SEC_BODY, str_concat(ind1, str_concat("ChasmArray _iter = ", str_concat(iter_s, ";"))))
+      sec_emit(cctx, @SEC_BODY, str_concat(ind1, "for (int64_t _fi = 0; _fi < _iter.len; _fi++) {"))
+      depth = depth + 1
+      ind2 = indent_str(depth)
+      sec_emit(cctx, @SEC_BODY, str_concat(ind2, str_concat(elem_c2, str_concat(" ", str_concat(var_n15, str_concat(" = chasm_array_get", str_concat(et_suf2, str_concat("(ctx, &_iter, _fi);"))))))))
+    end
+    if k == :for_end do
+      depth = depth - 1
+      ind1 = indent_str(depth)
+      sec_emit(cctx, @SEC_BODY, str_concat(ind1, "}"))
+      depth = depth - 1
+      ind2 = indent_str(depth)
+      sec_emit(cctx, @SEC_BODY, str_concat(ind2, "}"))
+    end
+
+    if k == :struct_new do
+      sn = c_type(op.dst.tid, prog.structs)
+      fields_s = ""
+      fi15 = 0
+      while fi15 < op.ac do
+        fv15 :: IRVal = prog.args.get(op.ai + fi15)
+        if fi15 > 0 do fields_s = str_concat(fields_s, ", ") end
+        fields_s = str_concat(fields_s, fv15.tmp)
+        fi15 = fi15 + 1
+      end
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(sn, str_concat(" ", str_concat(op.dst.tmp, str_concat(" = ", str_concat(sn, str_concat("{ ", str_concat(fields_s, " };")))))))))
+    end
+
+    if k == :tuple_new do
+      tsize = op.ac
+      ttype = "ChasmTuple2"
+      if tsize == 3 do ttype = "ChasmTuple3" end
+      tfields = ""
+      ti15 = 0
+      while ti15 < tsize do
+        tv15 :: IRVal = prog.args.get(op.ai + ti15)
+        if ti15 > 0 do tfields = str_concat(tfields, ", ") end
+        tfields = str_concat(tfields, tv15.tmp)
+        ti15 = ti15 + 1
+      end
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(ttype, str_concat(" ", str_concat(op.dst.tmp, str_concat(" = {", str_concat(tfields, "};")))))))
+    end
+
+    if k == :tuple_get do
+      field_s15 = str_concat("v", op.b.tmp)
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(c_type(op.dst.tid, prog.structs), str_concat(" ", str_concat(op.dst.tmp, str_concat(" = ", str_concat(op.a.tmp, str_concat(".", str_concat(field_s15, ";")))))))))
+    end
+
+    if k == :discard do
+      sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat(op.a.tmp, ";")))
+    end
+
+    i = i + 1
+  end
+end
+
+defp ir_codegen(pool :: []Node, ch :: []int, root :: int,
+                types :: []int, structs :: []StructDef,
+                fields :: []FieldDef, fns :: []FnSig) do
+  codegen(pool, ch, root, types, structs, fields, fns)
+end
