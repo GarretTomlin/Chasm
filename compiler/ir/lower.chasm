@@ -591,6 +591,14 @@ defp lower_stmt(lctx :: LowerCtx, idx :: int) do
   end
 end
 
+defp is_stmt_tag(tag :: atom) :: bool do
+  return tag == :var_decl or tag == :assign or tag == :return_stmt or
+    tag == :if_stmt or tag == :while_stmt or tag == :for_stmt or
+    tag == :break_stmt or tag == :continue_stmt or
+    tag == :call or tag == :method_call or tag == :at_assign or
+    tag == :tuple_dest
+end
+
 # ---- lower_block_body: walk a block node and lower each statement ------------
 
 defp lower_block_body(lctx :: LowerCtx, block_idx :: int) do
