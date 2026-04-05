@@ -12,7 +12,7 @@ __attribute__((weak)) void chasm_module_init(ChasmCtx *ctx) { (void)ctx; }
 void chasm_main(ChasmCtx *ctx);
 
 int main(void) {
-    static uint8_t frame_buf  [8 * 1024 * 1024];
+    static uint8_t frame_buf  [512 * 1024 * 1024];
     static uint8_t script_buf [8 * 1024 * 1024];
     static uint8_t persist_buf[8 * 1024 * 1024];
     ChasmCtx ctx = {
@@ -20,6 +20,7 @@ int main(void) {
         .script     = { script_buf,  0, sizeof(script_buf)  },
         .persistent = { persist_buf, 0, sizeof(persist_buf) },
     };
+    chasm_ctx_init_gc(&ctx);
     chasm_module_init(&ctx);
     chasm_main(&ctx);
     return 0;

@@ -199,10 +199,10 @@ defp lower_expr(lctx :: LowerCtx, idx :: int) :: IRVal do
     recv_v     = lower_expr(lctx, node.a)
     args_start3 = lctx.arg_len.get(0)
     lctx_push_arg(lctx, recv_v)
-    ac3 = node.b
+    ac3 = node.c
     ai3 = 0
     while ai3 < ac3 do
-      arg_node_idx3 = lctx.ch.get(node.c + ai3)
+      arg_node_idx3 = lctx.ch.get(node.b + ai3)
       av3 = lower_expr(lctx, arg_node_idx3)
       lctx_push_arg(lctx, av3)
       ai3 = ai3 + 1
@@ -277,8 +277,7 @@ defp lower_expr(lctx :: LowerCtx, idx :: int) :: IRVal do
           child_idx7 = lctx.ch.get(node.a + si7)
           child7 :: Node = lctx.pool.get(child_idx7)
           if child7.name == fd7.name do
-            val_idx7 = lctx.ch.get(child7.a)
-            fv7 = lower_expr(lctx, val_idx7)
+            fv7 = lower_expr(lctx, child7.a)
             lctx_push_arg(lctx, fv7)
             found7 = true
           end
@@ -307,11 +306,10 @@ defp lower_expr(lctx :: LowerCtx, idx :: int) :: IRVal do
     as8     = lctx.arg_len.get(0)
     lctx_push_arg(lctx, base_v8)
     ui8 = 0
-    while ui8 < node.b do
-      child_idx8 = lctx.ch.get(node.c + ui8)
+    while ui8 < node.c do
+      child_idx8 = lctx.ch.get(node.b + ui8)
       child8 :: Node = lctx.pool.get(child_idx8)
-      val_idx8 = lctx.ch.get(child8.a)
-      uv8 = lower_expr(lctx, val_idx8)
+      uv8 = lower_expr(lctx, child8.a)
       name_val8 = IRVal{ tmp: child8.name, tid: 0, elem_tid: 0 }
       lctx_push_arg(lctx, name_val8)
       lctx_push_arg(lctx, uv8)
@@ -325,40 +323,20 @@ defp lower_expr(lctx :: LowerCtx, idx :: int) :: IRVal do
   end
 
   if tag == :interp_expr do
-    seg_count9 = node.b
-    if seg_count9 == 0 do
-      dst9 = lctx_tmp(lctx, @TID_STRING)
-      lctx_emit(lctx, IROp{ op: :lit_str, dst: dst9, a: irval_void(), b: irval_void(),
-        name: "\042\042", ai: 0, ac: 0, line: node.line, col: node.col })
-      return dst9
+    inner_v9 = lower_expr(lctx, node.a)
+    inner_t9 = inner_v9.tid
+    if inner_t9 == @TID_STRING or inner_t9 == @TID_ATOM do
+      return inner_v9
     end
-    acc9 = lower_expr(lctx, lctx.ch.get(node.a))
-    si9 = 1
-    while si9 < seg_count9 do
-      seg_idx9 = lctx.ch.get(node.a + si9)
-      seg_v9   = lower_expr(lctx, seg_idx9)
-      seg_t9   = seg_v9.tid
-      if seg_t9 != @TID_STRING and seg_t9 != @TID_ATOM do
-        conv_fn9 = "int_to_str"
-        if seg_t9 == @TID_FLOAT do conv_fn9 = "float_to_str" end
-        if seg_t9 == @TID_BOOL  do conv_fn9 = "bool_to_str"  end
-        as9b = lctx.arg_len.get(0)
-        lctx_push_arg(lctx, seg_v9)
-        str9 = lctx_tmp(lctx, @TID_STRING)
-        lctx_emit(lctx, IROp{ op: :call, dst: str9, a: irval_void(), b: irval_void(),
-          name: conv_fn9, ai: as9b, ac: 1, line: node.line, col: node.col })
-        seg_v9 = str9
-      end
-      as9c = lctx.arg_len.get(0)
-      lctx_push_arg(lctx, acc9)
-      lctx_push_arg(lctx, seg_v9)
-      new_acc9 = lctx_tmp(lctx, @TID_STRING)
-      lctx_emit(lctx, IROp{ op: :call, dst: new_acc9, a: irval_void(), b: irval_void(),
-        name: "str_concat", ai: as9c, ac: 2, line: node.line, col: node.col })
-      acc9 = new_acc9
-      si9 = si9 + 1
-    end
-    return acc9
+    conv_fn9 = "int_to_str"
+    if inner_t9 == @TID_FLOAT do conv_fn9 = "float_to_str" end
+    if inner_t9 == @TID_BOOL  do conv_fn9 = "bool_to_str"  end
+    as9 = lctx.arg_len.get(0)
+    lctx_push_arg(lctx, inner_v9)
+    dst9 = lctx_tmp(lctx, @TID_STRING)
+    lctx_emit(lctx, IROp{ op: :call, dst: dst9, a: irval_void(), b: irval_void(),
+      name: conv_fn9, ai: as9, ac: 1, line: node.line, col: node.col })
+    return dst9
   end
 
   if tag == :if_stmt do
@@ -383,8 +361,8 @@ defp lower_expr(lctx :: LowerCtx, idx :: int) :: IRVal do
     subj_v11   = lower_expr(lctx, node.a)
     dst11      = lctx_tmp(lctx, tid)
     ci11 = 0
-    while ci11 < node.b do
-      case_idx11 = lctx.ch.get(node.c + ci11)
+    while ci11 < node.c do
+      case_idx11 = lctx.ch.get(node.b + ci11)
       case_nd11 :: Node = lctx.pool.get(case_idx11)
       pat_v11  = lower_expr(lctx, case_nd11.a)
       eq_v11   = lctx_tmp(lctx, @TID_BOOL)
