@@ -53,15 +53,17 @@ The compiler infers the lifetime of every expression:
 | Expression form | Inferred lifetime |
 |---|---|
 | `@attr` reference | The attr's declared lifetime |
-| Literal (`0`, `0.0`, `true`, `:atom`) | Persistent — assignable anywhere |
-| Local variable | Frame |
+| Literal (`0`, `0.0`, `true`, `:atom`, `"text"`) | Persistent — assignable anywhere |
+| Local variable | Inferred from its assigned value |
 | `f(a, b, ...)` call | Max lifetime of all arguments |
 | `recv.method(a, ...)` call | Max lifetime of receiver + arguments |
 | `a + b`, `a * b`, etc. | Max lifetime of both operands |
 | `copy_to_script(x)` | Script |
 | `persist_copy(x)` | Persistent |
 
-This means expressions that involve `@script` attrs automatically carry script lifetime, so assigning them back to a `@script` attr is fine without promotion. Only when a frame-local value (e.g. a computed delta from `dt`) flows into a longer-lived attr does the compiler require an explicit promotion call.
+Local variable lifetime is inferred from the right-hand side at declaration: a local assigned from `persist_copy(x)` has persistent lifetime; one assigned from a `@script` attr has script lifetime; one assigned from an integer literal has persistent lifetime. The inferred lifetime propagates through chains of assignments. Explicit `:: frame / :: script / :: persistent` annotations on locals are accepted but not required.
+
+This means expressions that involve `@script` attrs automatically carry script lifetime, so assigning them back to a `@script` attr is fine without promotion. Only when a value that is genuinely frame-lifetime (e.g. derived from a frame-only function parameter with no promotion) flows into a longer-lived attr does the compiler require an explicit promotion call.
 
 ### Promotion Functions
 
@@ -346,12 +348,17 @@ The `= "c_name"` alias is optional. Without it, the Chasm name is used as the C 
 ## Variables
 
 ```chasm
-x :: frame = 42         # explicit frame lifetime
-y :: script = 0.0       # explicit script lifetime
-z = compute()           # lifetime inferred from right-hand side
+x = 42                  # persistent (integer literal)
+y = copy_to_script(x)   # script (copy_to_script result)
+z = persist_copy(x)     # persistent (persist_copy result)
+
+# Explicit annotations are accepted but not required
+a :: frame      = compute()   # forced frame lifetime
+b :: script     = 0.0         # forced script lifetime
+c :: persistent = 0           # forced persistent lifetime
 ```
 
-If the lifetime is omitted, Chasm infers it from the assigned value.
+If the lifetime annotation is omitted, Chasm infers it from the right-hand side. The inferred lifetime propagates through chains of local assignments.
 
 ---
 
@@ -534,7 +541,8 @@ end
 The `expr_lifetime` rules for arrays:
 - A call result carries the **max lifetime of its arguments** — so `clamp(@player_x + delta, ...)` is script-lifetime because `@player_x` is script.
 - A method call result carries the **max lifetime of the receiver and all arguments**.
-- Literals (`0`, `0.0`, `true`, `:atom`) are persistent-lifetime — assignable anywhere without promotion.
+- Literals (`0`, `0.0`, `true`, `:atom`, `"text"`) are persistent-lifetime — assignable anywhere without promotion.
+- A local variable carries the lifetime inferred from its right-hand side, not a fixed `frame` assumption.
 
 ---
 
