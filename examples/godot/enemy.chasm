@@ -2,15 +2,15 @@
 #
 # The enemy walks left and right between two bounds, reversing on collision.
 
-@x       :: script = 0.0
-@y       :: script = 0.0
-@dir     :: script = 1.0
-@speed   :: script = 80.0
-@gravity :: script = 500.0
-@vel_y   :: script = 0.0
+@x       = 0.0
+@y       = 0.0
+@dir     = 1.0
+@speed   = 80.0
+@gravity = 500.0
+@vel_y   = 0.0
 
-@bound_left  :: script = -200.0
-@bound_right :: script =  200.0
+@bound_left  = -200.0
+@bound_right =  200.0
 
 fn on_init()
     @x = get_pos_x()

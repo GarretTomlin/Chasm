@@ -18,37 +18,37 @@
 # 5=Z(cyan)    6=J(pink) 7=L(green)
 
 # ---- Board (10 x 20 = 200 cells, row-major) ---------------------------------
-@board :: script = array_fixed(200, 0)
+@board = array_fixed(200, 0)
 
 # ---- Active piece -----------------------------------------------------------
-@px :: script = 3   # board col of piece bounding-box origin
-@py :: script = 0   # board row of piece bounding-box origin
-@pt :: script = 1   # piece type 1-7
-@pr :: script = 0   # rotation 0-3
+@px = 3   # board col of piece bounding-box origin
+@py = 0   # board row of piece bounding-box origin
+@pt = 1   # piece type 1-7
+@pr = 0   # rotation 0-3
 
 # ---- Queue / hold -----------------------------------------------------------
-@next_t    :: script = 2
-@hold_t    :: script = 0   # 0 = empty
-@hold_used :: script = 0   # 1 = already swapped this piece
+@next_t    = 2
+@hold_t    = 0   # 0 = empty
+@hold_used = 0   # 1 = already swapped this piece
 
 # ---- Gravity ----------------------------------------------------------------
 # fall_t counts up; when it reaches fall_interval a row is dropped
-@fall_t :: script = 0.0
+@fall_t = 0.0
 
 # ---- Lock delay -------------------------------------------------------------
-@lock_t :: script = 0.0
+@lock_t = 0.0
 # NOTE: on_floor is NOT stored state — it is recomputed each tick
 # from the current piece position in on_tick.
 
 # ---- DAS (delayed auto-shift) -----------------------------------------------
-@das_t   :: script = 0.0
-@das_dir :: script = 0   # -1 left  0 none  1 right
+@das_t   = 0.0
+@das_dir = 0   # -1 left  0 none  1 right
 
 # ---- Score / progress -------------------------------------------------------
-@score :: script     = 0
+@score     = 0
 @best  :: persistent = 0
-@lines :: script     = 0
-@level :: script     = 1
+@lines     = 0
+@level     = 1
 
 # ---- Frame time graph -------------------------------------------------------
 # 120 samples stored in persistent arena — never GC'd, never moved.
@@ -62,34 +62,34 @@
 # Hold LEFT_SHIFT during play to run 500 heavy float computations per tick.
 # All temporaries are locals — wiped in one pointer reset each tick (frame arena).
 # No GC. No accumulation. Watch the graph stay flat under load.
-@stress_mode :: script = 0
+@stress_mode = 0
 
 # ---- Game state  0=menu  1=playing  2=paused  3=gameover -------------------
-@gstate :: script = 0
+@gstate = 0
 
 # ---- Textures ---------------------------------------------------------------
-@tex_bg     :: script = 0
-@tex_border :: script = 0
-@tex_hold   :: script = 0
-@tex_next   :: script = 0
-@tex_grid   :: script = 0
-@tex_b1     :: script = 0   # I  purple
-@tex_b2     :: script = 0   # O  red
-@tex_b3     :: script = 0   # T  blue
-@tex_b4     :: script = 0   # S  yellow
-@tex_b5     :: script = 0   # Z  cyan
-@tex_b6     :: script = 0   # J  pink
-@tex_b7     :: script = 0   # L  green
+@tex_bg     = 0
+@tex_border = 0
+@tex_hold   = 0
+@tex_next   = 0
+@tex_grid   = 0
+@tex_b1     = 0   # I  purple
+@tex_b2     = 0   # O  red
+@tex_b3     = 0   # T  blue
+@tex_b4     = 0   # S  yellow
+@tex_b5     = 0   # Z  cyan
+@tex_b6     = 0   # J  pink
+@tex_b7     = 0   # L  green
 
 # ---- Audio ------------------------------------------------------------------
-@music      :: script = 0
-@snd_move   :: script = 0
-@snd_rotate :: script = 0
-@snd_drop   :: script = 0
-@snd_clear  :: script = 0
-@snd_tetris :: script = 0
-@snd_hold   :: script = 0
-@snd_over   :: script = 0
+@music      = 0
+@snd_move   = 0
+@snd_rotate = 0
+@snd_drop   = 0
+@snd_clear  = 0
+@snd_tetris = 0
+@snd_hold   = 0
+@snd_over   = 0
 
 # ---- Piece cell offsets -----------------------------------------------------
 # Standard Tetris piece layout in a 4x4 bounding box.

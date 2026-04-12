@@ -9,14 +9,14 @@
 # Controls: WASD / arrow keys to move, Space to jump.
 
 # ---- State (script lifetime = node lifetime) ----------------------------
-@vel_x :: script = 0.0
-@vel_y :: script = 0.0
+@vel_x = 0.0
+@vel_y = 0.0
 
 # ---- Constants ----------------------------------------------------------
-@speed     :: script = 200.0
-@gravity   :: script = 980.0
-@jump_vel  :: script = -400.0
-@on_floor  :: script = false
+@speed     = 200.0
+@gravity   = 980.0
+@jump_vel  = -400.0
+@on_floor  = false
 
 fn on_init()
     print_msg("player script loaded")

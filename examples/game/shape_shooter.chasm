@@ -24,32 +24,32 @@ defstruct Enemy do
 end
 
 # ---- World constants --------------------------------------------------------
-@world_width  :: script = 800.0
-@world_height :: script = 600.0
+@world_width  = 800.0
+@world_height = 600.0
 
 # ---- Player state -----------------------------------------------------------
-@player_x     :: script = 400.0
-@player_y     :: script = 300.0
-@player_angle :: script = 0.0
-@player_speed :: script = 180.0
+@player_x     = 400.0
+@player_y     = 300.0
+@player_angle = 0.0
+@player_speed = 180.0
 
 # ---- Camera -----------------------------------------------------------------
-@camera_x :: script = 400.0
-@camera_y :: script = 300.0
+@camera_x = 400.0
+@camera_y = 300.0
 
 # ---- Bullets — 4 slots ------------------------------------------------------
-@bullets :: script = array_fixed(4, Bullet{ x: 0.0, y: 0.0, vel_x: 0.0, vel_y: 0.0, active: 0 })
+@bullets = array_fixed(4, Bullet{ x: 0.0, y: 0.0, vel_x: 0.0, vel_y: 0.0, active: 0 })
 
 # ---- Enemies — 8 slots ------------------------------------------------------
-@enemies :: script = array_fixed(8, Enemy{ x: 0.0, y: 0.0, alive: 0 })
+@enemies = array_fixed(8, Enemy{ x: 0.0, y: 0.0, alive: 0 })
 
 # ---- Score / game state -----------------------------------------------------
-@score          :: script     = 0
+@score              = 0
 @high_score     :: persistent = 0
-@shoot_cooldown :: script     = 0.0
-@game_over      :: script     = 0
-@win            :: script     = 0
-@time_alive     :: script     = 0.0
+@shoot_cooldown     = 0.0
+@game_over          = 0
+@win                = 0
+@time_alive         = 0.0
 
 # ---- Module init: seed enemy positions --------------------------------------
 

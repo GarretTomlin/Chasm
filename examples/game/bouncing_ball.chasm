@@ -1,12 +1,12 @@
 # example.chasm — Bouncing ball demo with state-driven visuals
 # Run: chasm run --engine raylib examples/game/example.chasm
 
-@x      :: script = 400.0
-@y      :: script = 300.0
-@vx     :: script = 200.0
-@vy     :: script = 150.0
-@radius :: script = 24.0
-@state  :: script = :normal
+@x      = 400.0
+@y      = 300.0
+@vx     = 200.0
+@vy     = 150.0
+@radius = 24.0
+@state  = :normal
 
 defp ball_color(state :: atom) :: int do
   return match state {
