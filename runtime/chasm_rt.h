@@ -425,6 +425,72 @@ static inline void chasm_array_push_raw(ChasmCtx *ctx, ChasmArray *a, const void
     }
 }
 
+/* ---- ChasmMap: string-keyed hash map --------------------------------- */
+typedef union { int64_t i; double f; int b; const char *s; } ChasmMapVal;
+
+typedef struct {
+    const char  **keys;   /* NULL = empty slot, (char*)-1 = tombstone */
+    ChasmMapVal  *vals;
+    uint32_t      cap;
+    uint32_t      len;
+} ChasmMap;
+
+static inline uint32_t _chasm_map_hash(const char *s) {
+    uint32_t h = 2166136261u;
+    while (*s) { h ^= (uint8_t)*s++; h *= 16777619u; }
+    return h;
+}
+
+/* Returns slot index of key, or -1 if not present. Skips tombstones. */
+static inline int32_t _chasm_map_find(const ChasmMap *m, const char *key) {
+    if (!m->keys || !key || m->cap == 0) return -1;
+    uint32_t h = _chasm_map_hash(key) % m->cap;
+    for (uint32_t p = 0; p < m->cap; p++) {
+        uint32_t i = (h + p) % m->cap;
+        if (!m->keys[i]) return -1;
+        if (m->keys[i] == (const char *)-1) continue;
+        if (strcmp(m->keys[i], key) == 0) return (int32_t)i;
+    }
+    return -1;
+}
+
+/* Returns slot for insertion (empty or tombstone or existing key). */
+static inline uint32_t _chasm_map_slot(const ChasmMap *m, const char *key) {
+    uint32_t h = _chasm_map_hash(key) % m->cap;
+    int32_t tomb = -1;
+    for (uint32_t p = 0; p < m->cap; p++) {
+        uint32_t i = (h + p) % m->cap;
+        if (!m->keys[i]) return (tomb >= 0) ? (uint32_t)tomb : i;
+        if (m->keys[i] == (const char *)-1) { if (tomb < 0) tomb = (int32_t)i; continue; }
+        if (strcmp(m->keys[i], key) == 0) return i;
+    }
+    return (tomb >= 0) ? (uint32_t)tomb : 0;
+}
+
+static inline ChasmMap chasm_map_new(ChasmCtx *ctx, int64_t cap) {
+    (void)ctx;
+    if (cap < 8) cap = 8;
+    const char **keys = (const char **)calloc((size_t)cap, sizeof(const char *));
+    ChasmMapVal *vals = (ChasmMapVal  *)calloc((size_t)cap, sizeof(ChasmMapVal));
+    return (ChasmMap){ keys, vals, (uint32_t)cap, 0 };
+}
+
+static inline int     chasm_map_has(ChasmCtx *c, ChasmMap *m, const char *k) { (void)c; return _chasm_map_find(m, k) >= 0; }
+static inline int64_t chasm_map_len(ChasmCtx *c, ChasmMap *m)                { (void)c; return (int64_t)m->len; }
+static inline void    chasm_map_del(ChasmCtx *c, ChasmMap *m, const char *k) {
+    (void)c;
+    int32_t i = _chasm_map_find(m, k);
+    if (i >= 0) { m->keys[i] = (const char *)-1; m->len--; }
+}
+static inline void chasm_map_set_i(ChasmCtx *c, ChasmMap *m, const char *k, int64_t v)     { (void)c; uint32_t s=_chasm_map_slot(m,k); if(!m->keys[s]||(m->keys[s]==(const char*)-1))m->len++; m->keys[s]=k; m->vals[s].i=v; }
+static inline void chasm_map_set_f(ChasmCtx *c, ChasmMap *m, const char *k, double v)      { (void)c; uint32_t s=_chasm_map_slot(m,k); if(!m->keys[s]||(m->keys[s]==(const char*)-1))m->len++; m->keys[s]=k; m->vals[s].f=v; }
+static inline void chasm_map_set_b(ChasmCtx *c, ChasmMap *m, const char *k, int v)         { (void)c; uint32_t s=_chasm_map_slot(m,k); if(!m->keys[s]||(m->keys[s]==(const char*)-1))m->len++; m->keys[s]=k; m->vals[s].b=v; }
+static inline void chasm_map_set_s(ChasmCtx *c, ChasmMap *m, const char *k, const char *v) { (void)c; uint32_t s=_chasm_map_slot(m,k); if(!m->keys[s]||(m->keys[s]==(const char*)-1))m->len++; m->keys[s]=k; m->vals[s].s=v; }
+static inline int64_t     chasm_map_get_i(ChasmCtx *c, ChasmMap *m, const char *k) { (void)c; int32_t i=_chasm_map_find(m,k); return i>=0?m->vals[i].i:0; }
+static inline double      chasm_map_get_f(ChasmCtx *c, ChasmMap *m, const char *k) { (void)c; int32_t i=_chasm_map_find(m,k); return i>=0?m->vals[i].f:0.0; }
+static inline int         chasm_map_get_b(ChasmCtx *c, ChasmMap *m, const char *k) { (void)c; int32_t i=_chasm_map_find(m,k); return i>=0?m->vals[i].b:0; }
+static inline const char* chasm_map_get_s(ChasmCtx *c, ChasmMap *m, const char *k) { (void)c; int32_t i=_chasm_map_find(m,k); return i>=0?m->vals[i].s:""; }
+
 /* ---- string builder ---------------------------------------------- */
 typedef struct { char *buf; int64_t len; int64_t cap; } ChasmStrBuilder;
 static inline ChasmStrBuilder chasm_str_builder_new(ChasmCtx *ctx) {
