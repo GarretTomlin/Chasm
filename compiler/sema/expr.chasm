@@ -441,6 +441,15 @@ defp sema_expr(sctx :: SCtx,
     return @TID_UNKNOWN
   end
 
+  if tag == :index_set do
+    idx_node_is = sctx.pool.get(node.a)
+    _ot  = sema_expr(sctx, syms, sym_len, dc, idx_node_is.a)
+    _it  = sema_expr(sctx, syms, sym_len, dc, idx_node_is.b)
+    _vt  = sema_expr(sctx, syms, sym_len, dc, node.b)
+    sctx.types.set(idx, @TID_VOID)
+    return @TID_VOID
+  end
+
   if tag == :match_expr do
     return sema_expr_match(sctx, syms, sym_len, dc, idx)
   end

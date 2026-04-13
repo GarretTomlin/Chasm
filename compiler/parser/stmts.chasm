@@ -289,7 +289,22 @@ defp parse_stmt(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
     np = alloc_node(pool, np, :tuple_dest, val, 0, 0, names_str, line, col)
     return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
   end
-  return parse_expr(tokens, pool, np, ch, cp, pos, dc)
+  lhs_r  = parse_expr(tokens, pool, np, ch, cp, pos, dc)
+  lhs_ni = lhs_r.node_idx
+  lhs_nd = pool.get(lhs_ni)
+  if lhs_nd.tag == :index and tok_kind(tokens, lhs_r.pos) == :eq do
+    pos = lhs_r.pos + 1
+    np  = lhs_r.np
+    cp  = lhs_r.cp
+    rv  = parse_expr(tokens, pool, np, ch, cp, pos, dc)
+    pos = rv.pos
+    np  = rv.np
+    cp  = rv.cp
+    ni  = np
+    np  = alloc_node(pool, np, :index_set, lhs_ni, rv.node_idx, 0, "", line, col)
+    return ParseResult{ pos: pos, np: np, cp: cp, node_idx: ni }
+  end
+  return lhs_r
 end
 
 # ---- parse_block_body --------------------------------------------------------

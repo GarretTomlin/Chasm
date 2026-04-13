@@ -367,6 +367,18 @@ defp lower_expr(lctx :: LowerCtx, idx :: int) :: IRVal do
     return dst6
   end
 
+  if tag == :index_set do
+    idx_nd7 = lctx.pool.get(node.a)
+    obj_v7  = lower_expr(lctx, idx_nd7.a)
+    idx_v7  = lower_expr(lctx, idx_nd7.b)
+    val_v7  = lower_expr(lctx, node.b)
+    as7     = lctx.arg_len.get(0)
+    lctx_push_arg(lctx, val_v7)
+    lctx_emit(lctx, IROp{ op: :index_set, dst: irval_void(), a: obj_v7, b: idx_v7,
+    name: "", ai: as7, ac: 1, line: node.line, col: node.col })
+    return irval_void()
+  end
+
   if tag == :struct_lit do
     struct_tid7     = tid
     supplied_count7 = node.b
@@ -747,7 +759,7 @@ defp is_stmt_tag(tag :: atom) :: bool do
   tag == :if_stmt or tag == :while_stmt or tag == :for_stmt or
   tag == :break_stmt or tag == :continue_stmt or
   tag == :call or tag == :method_call or tag == :at_assign or
-  tag == :tuple_dest
+  tag == :tuple_dest or tag == :index_set
 end
 
 # ---- lower_block_as_expr: evaluate a block as an expression (last child) -----
