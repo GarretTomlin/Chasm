@@ -300,9 +300,9 @@ defp parse_stmt(tokens :: []Token, pool :: []Node, np :: int, ch :: []int, cp ::
     pos = rv.pos
     np  = rv.np
     cp  = rv.cp
-    ni  = np
+    node_idx = np
     np  = alloc_node(pool, np, :index_set, lhs_ni, rv.node_idx, 0, "", line, col)
-    return ParseResult{ pos: pos, np: np, cp: cp, node_idx: ni }
+    return ParseResult{ pos: pos, np: np, cp: cp, node_idx: node_idx }
   end
   return lhs_r
 end
