@@ -18,7 +18,7 @@ def main() do
   types   :: []int = make_int_pool(60000)
   syms    :: []Sym = make_sym_pool(2000)
 
-  structs = collect_struct_list(pool, ch, root, 10)
+  structs = collect_struct_list(pool, ch, root, 11)
   fields  = collect_field_list(pool, ch, structs)
   fns     = collect_fn_list(pool, ch, root, structs)
   dc      = sema_all(pool, ch, root, types, syms, fns, structs, fields, src, "sema_combined.chasm", dc)

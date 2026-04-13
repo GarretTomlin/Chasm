@@ -132,9 +132,11 @@ defp ir_emit_fn(cctx :: CCtx, prog :: IRProg, fn_def :: IRFn) do
       end
       is_map_new = false
       if op.name == "map_new" do
-        is_map_new = true
-        a0_mn :: IRVal = prog.args.get(op.ai)
-        sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("ChasmMap ", str_concat(op.dst.tmp, str_concat(" = chasm_map_new(ctx, ", str_concat(a0_mn.tmp, ");"))))))
+        if op.ac >= 1 do
+          is_map_new = true
+          a0_mn :: IRVal = prog.args.get(op.ai)
+          sec_emit(cctx, @SEC_BODY, str_concat(ind, str_concat("ChasmMap ", str_concat(op.dst.tmp, str_concat(" = chasm_map_new(ctx, ", str_concat(a0_mn.tmp, ");"))))))
+        end
       end
       if is_typed_arr_new == false and is_map_new == false do
         a_str = args_str(prog, op.ai, op.ac)
@@ -198,6 +200,8 @@ defp ir_emit_fn(cctx :: CCtx, prog :: IRProg, fn_def :: IRFn) do
         if is_no_suf_map do
           fn_call_mc = str_concat("chasm_map_", str_concat(op.name, str_concat("(ctx, &", str_concat(recv_s, str_concat(sep_rest, str_concat(rest_a, ")"))))))
         else
+          # Default to _i (int) when elem_tid is TID_UNKNOWN (0) — occurs when
+          # sema couldn't infer value type (e.g. map stored in a struct field).
           et_suf_map = "_i"
           if op.a.elem_tid == @TID_FLOAT  do et_suf_map = "_f" end
           if op.a.elem_tid == @TID_BOOL   do et_suf_map = "_b" end
